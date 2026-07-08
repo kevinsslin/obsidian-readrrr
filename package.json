@@ -1,6 +1,6 @@
 {
   "name": "rsvp-reader",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "RSVP speed-reading for Obsidian, with an optional voice narrator synced to the words.",
   "type": "module",
   "license": "MIT",

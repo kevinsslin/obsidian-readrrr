@@ -1,7 +1,7 @@
 {
 	"id": "rsvp-reader",
 	"name": "RSVP Reader",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"minAppVersion": "1.7.2",
 	"description": "Read notes fast with RSVP: words flash one at a time at a fixed point, with an optional voice narrator synced to the words.",
 	"author": "Kevin Lin",
