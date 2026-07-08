@@ -73,9 +73,9 @@ export default class RsvpReaderPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const data = await this.loadData();
+    const data = (await this.loadData()) as Partial<RsvpReaderSettings> | null;
     const legacy = data as { followInNote?: unknown; highlightInNote?: unknown } | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data ?? {});
     if (
       typeof legacy?.followInNote !== "boolean" &&
       typeof legacy?.highlightInNote === "boolean"

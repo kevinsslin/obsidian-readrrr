@@ -102,7 +102,6 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
         slider
           .setLimits(100, 1000, 10)
           .setValue(this.plugin.settings.wpm)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.wpm = value;
             await save();
@@ -116,7 +115,6 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
         slider
           .setLimits(24, 140, 2)
           .setValue(this.plugin.settings.fontSize)
-          .setDynamicTooltip()
           .onChange(async (value) => {
             this.plugin.settings.fontSize = value;
             await save();
@@ -205,7 +203,6 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
           slider
             .setLimits(0.5, 2, 0.1)
             .setValue(this.plugin.settings.pitch)
-            .setDynamicTooltip()
             .onChange(async (value) => {
               this.plugin.settings.pitch = value;
               await save();
@@ -218,7 +215,6 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
           slider
             .setLimits(0, 1, 0.05)
             .setValue(this.plugin.settings.volume)
-            .setDynamicTooltip()
             .onChange(async (value) => {
               this.plugin.settings.volume = value;
               await save();
@@ -278,7 +274,6 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
       slider
         .setLimits(min, max, step)
         .setValue(this.plugin.settings[key] as number)
-        .setDynamicTooltip()
         .onChange(async (value) => {
           (this.plugin.settings[key] as number) = value;
           this.plugin.refreshViews();

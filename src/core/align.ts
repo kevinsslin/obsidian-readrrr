@@ -17,7 +17,7 @@ export interface TokenSpan {
  * endsParagraph; trailing tokens form a final sentence even without a flag.
  */
 export function sentenceTokenSpans(tokens: Token[]): TokenSpan[] {
-  const spans: TokenSpan[] = new Array(tokens.length);
+  const spans: TokenSpan[] = new Array<TokenSpan>(tokens.length);
   let start = 0;
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i].endsSentence || tokens[i].endsParagraph || i === tokens.length - 1) {
@@ -68,7 +68,7 @@ export function sentenceRangesByToken(
 ): Array<SourceRange | null> {
   if (tokens.length === 0) return [];
 
-  const result: Array<SourceRange | null> = new Array(tokens.length).fill(null);
+  const result: Array<SourceRange | null> = new Array<SourceRange | null>(tokens.length).fill(null);
   let sentenceStart = 0;
   let rangeStart: number | null = null;
   let rangeEnd: number | null = null;

@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Changed
+
+- Code-quality and Obsidian plugin-review compliance: set element styles
+  through the Obsidian helper API, use window-scoped globals for popout-window
+  compatibility, and drop the build-time `builtin-modules` dependency in favor
+  of Node's built-in list. Releases now publish build-provenance attestations.
+  No change to reading behavior.
+
 ## [0.1.0]
 
 Initial release.
@@ -41,5 +51,6 @@ Initial release.
   and pacing, applied live to open reader panes.
 - Theme-aware styling for light and dark.
 
-[Unreleased]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.1...HEAD
+[0.1.1]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.0...0.1.1
 [0.1.0]: https://github.com/kevinsslin/obsidian-rsvp-reader/releases/tag/0.1.0

@@ -142,14 +142,14 @@ interface HighlightRegistry {
 }
 
 function highlightRegistry(): HighlightRegistry | null {
-  const css = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS;
+  const css = (window as { CSS?: { highlights?: HighlightRegistry } }).CSS;
   return css?.highlights ?? null;
 }
 
 type HighlightConstructor = new (...ranges: Range[]) => unknown;
 
 function highlightCtor(): HighlightConstructor | null {
-  return (globalThis as { Highlight?: HighlightConstructor }).Highlight ?? null;
+  return (window as { Highlight?: HighlightConstructor }).Highlight ?? null;
 }
 
 /** True when the CSS Custom Highlight API is available in this runtime. */

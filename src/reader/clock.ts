@@ -10,7 +10,6 @@ export interface Clock {
 
 export const systemClock: Clock = {
   now: () => (typeof performance !== "undefined" ? performance.now() : Date.now()),
-  setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms) as unknown as number,
-  clearTimeout: (handle) =>
-    globalThis.clearTimeout(handle as unknown as ReturnType<typeof globalThis.setTimeout>),
+  setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimeout: (handle) => window.clearTimeout(handle),
 };

@@ -468,8 +468,8 @@ export class RsvpView extends ItemView {
     this.emptyEl.removeClass("rr-hidden");
     this.emptyEl.setText(message);
     this.counterEl.setText("0 / 0");
-    this.progressFillEl.style.width = "0%";
-    this.progressKnobEl.style.left = "0%";
+    this.progressFillEl.setCssStyles({ width: "0%" });
+    this.progressKnobEl.setCssStyles({ left: "0%" });
   }
 
   private sourceMarkdownView(): MarkdownView | null {
@@ -619,7 +619,7 @@ export class RsvpView extends ItemView {
     if (words.length === 0) return false;
 
     const container = view.previewMode.containerEl;
-    if (!(container instanceof HTMLElement)) return false;
+    if (!container.instanceOf(HTMLElement)) return false;
     const scroller = container.matches(".markdown-preview-view")
       ? container
       : (container.querySelector<HTMLElement>(".markdown-preview-view") ?? container);

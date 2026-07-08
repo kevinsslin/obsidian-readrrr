@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      attestations: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,6 +34,12 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: node esbuild.config.mjs production
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            styles.css
       - name: Extract release notes from CHANGELOG.md
         env:
           TAG: ${{ github.ref_name }}

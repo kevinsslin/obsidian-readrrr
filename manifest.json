@@ -5,6 +5,6 @@
 	"minAppVersion": "1.7.2",
 	"description": "Read notes fast with RSVP: words flash one at a time at a fixed point, with an optional voice narrator synced to the words.",
 	"author": "Kevin Lin",
-	"authorUrl": "https://github.com/kevinsslin/obsidian-rsvp-reader",
+	"authorUrl": "https://github.com/kevinsslin",
 	"isDesktopOnly": false
 }

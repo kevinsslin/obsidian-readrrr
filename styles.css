@@ -239,14 +239,25 @@
  */
 .rsvp-reader-active-sentence {
   background-color: var(--text-highlight-bg);
-  background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
   border-radius: 3px;
 }
 
 /* Reading-view variant, via the CSS Custom Highlight API (no DOM mutation). */
 ::highlight(rsvp-reader-sentence) {
   background-color: var(--text-highlight-bg);
-  background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
+}
+
+/*
+ * Prefer a translucent accent tint where color-mix is supported (every current
+ * Obsidian target); the solid --text-highlight-bg above is the fallback.
+ */
+@supports (background-color: color-mix(in srgb, red 50%, transparent)) {
+  .rsvp-reader-active-sentence {
+    background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
+  }
+  ::highlight(rsvp-reader-sentence) {
+    background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
+  }
 }
 
 /*
