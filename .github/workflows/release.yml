@@ -1,0 +1,59 @@
+name: Release
+
+# Tag the commit with the exact version from manifest.json (no leading "v"),
+# e.g. `git tag 0.1.0 && git push origin 0.1.0`, and this builds the plugin and
+# attaches main.js, manifest.json, and styles.css to a GitHub release.
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - name: Verify tag matches manifest version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
+            echo "Tag '$TAG' does not match manifest.json version '$MANIFEST_VERSION'." >&2
+            exit 1
+          fi
+      - run: npm run typecheck
+      - run: npm test
+      - run: node esbuild.config.mjs production
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Pull this version's section out of CHANGELOG.md (single source of
+          # truth) so the GitHub release shows the actual changes.
+          awk -v ver="$TAG" '
+            $0 ~ "^## \\[" ver "\\]" { flag = 1; next }
+            /^## \[/ { flag = 0 }
+            flag
+          ' CHANGELOG.md | sed -e '/./,$!d' > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No CHANGELOG.md section found for $TAG." >&2
+            echo "RSVP Reader $TAG." > RELEASE_NOTES.md
+          fi
+          cat RELEASE_NOTES.md
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file RELEASE_NOTES.md \
+            main.js manifest.json styles.css

@@ -1,0 +1,260 @@
+/*
+ * RSVP Reader styles.
+ * Reader pane rules are scoped under .rsvp-reader-view so they do not leak
+ * into the rest of Obsidian. The note-editor highlight at the bottom is
+ * intentionally unscoped because CodeMirror applies it inside the source note.
+ * Colors come from Obsidian CSS variables so the reader follows the active
+ * theme (light/dark) automatically.
+ */
+
+.rsvp-reader-view {
+  --rr-font-size: 64px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 1rem;
+  gap: 1rem;
+  background-color: var(--background-primary);
+}
+
+/* Word stage ------------------------------------------------------------- */
+
+.rsvp-reader-view .rr-stage {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  position: relative;
+  overflow: hidden; /* clip long words that extend past the edges */
+  cursor: pointer;
+  touch-action: none; /* handle press-and-hold without the page panning */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+ * Three columns keep the pivot letter horizontally centered for every word:
+ * the "before" text right-aligns against the center, the pivot sits in the
+ * middle, and "after" left-aligns. That fixed point is what removes eye
+ * movement (the ORP / Spritz technique).
+ */
+.rsvp-reader-view .rr-word {
+  display: grid;
+  /* minmax(0, 1fr) keeps both side columns equal even for long words, so the
+     pivot letter stays exactly on the center line (a plain 1fr floors at the
+     text width and shoves the pivot off-center). */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline;
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: var(--rr-font-size);
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--text-normal);
+  user-select: none;
+  /* Auto-fit (rsvp-view.ts fitWord) scales this element to fit narrow panes;
+     keep the origin on the center line so the pivot letter stays anchored. */
+  transform-origin: center;
+}
+
+.rsvp-reader-view .rr-before {
+  justify-self: end;
+  white-space: pre;
+}
+
+.rsvp-reader-view .rr-after {
+  justify-self: start;
+  white-space: pre;
+}
+
+.rsvp-reader-view .rr-pivot {
+  justify-self: center;
+  color: var(--text-accent);
+  font-weight: 600;
+  padding: 0 0.02em;
+}
+
+/*
+ * A faint vertical rule plus solid accent ticks mark the fixed anchor column,
+ * so the eye always knows where each word's pivot letter lands. Heights scale
+ * with the word font so the marks bracket the word instead of hiding inside it.
+ */
+.rsvp-reader-view .rr-stage::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: calc(var(--rr-font-size) * 1.7);
+  background-color: var(--text-accent);
+  opacity: 0.22;
+  pointer-events: none;
+}
+.rsvp-reader-view .rr-guide {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: calc(var(--rr-font-size) * 0.3);
+  border-radius: 2px;
+  background-color: var(--text-accent);
+}
+.rsvp-reader-view .rr-guide-top {
+  top: calc(50% - var(--rr-font-size) * 0.85);
+}
+.rsvp-reader-view .rr-guide-bottom {
+  top: calc(50% + var(--rr-font-size) * 0.55);
+}
+
+.rsvp-reader-view .rr-empty {
+  color: var(--text-muted);
+  font-size: 1rem;
+  text-align: center;
+}
+
+/* Progress --------------------------------------------------------------- */
+
+.rsvp-reader-view .rr-progress {
+  position: relative;
+  flex: 0 0 auto;
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--background-modifier-border);
+  cursor: pointer;
+  touch-action: none; /* let us handle drag without the page panning on touch */
+}
+.rsvp-reader-view .rr-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background-color: var(--text-accent);
+  transition: width 80ms linear;
+  pointer-events: none;
+}
+.rsvp-reader-view .rr-progress-knob {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background-color: var(--text-accent);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 2px var(--background-primary);
+  transition: left 80ms linear;
+  pointer-events: none;
+}
+/* While scrubbing, drop the easing so the fill/knob track the pointer exactly. */
+.rsvp-reader-view .rr-progress.rr-scrubbing .rr-progress-fill,
+.rsvp-reader-view .rr-progress.rr-scrubbing .rr-progress-knob {
+  transition: none;
+}
+
+/* Controls --------------------------------------------------------------- */
+
+.rsvp-reader-view .rr-controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.rsvp-reader-view .rr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  border-radius: var(--radius-s);
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+  border: none;
+  cursor: pointer;
+}
+.rsvp-reader-view .rr-btn:hover {
+  background-color: var(--background-modifier-active-hover);
+}
+.rsvp-reader-view .rr-btn.rr-btn-primary {
+  width: 2.8rem;
+  height: 2.8rem;
+  color: var(--text-on-accent);
+  background-color: var(--interactive-accent);
+}
+.rsvp-reader-view .rr-btn.rr-btn-primary:hover {
+  background-color: var(--interactive-accent-hover);
+}
+.rsvp-reader-view .rr-btn.rr-btn-active {
+  color: var(--text-on-accent);
+  background-color: var(--interactive-accent);
+}
+
+.rsvp-reader-view .rr-counter {
+  min-width: 6rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Speed bar -------------------------------------------------------------- */
+
+.rsvp-reader-view .rr-wpm-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.rsvp-reader-view .rr-wpm-bar input[type="range"] {
+  flex: 1 1 auto;
+  max-width: 320px;
+}
+.rsvp-reader-view .rr-wpm-value {
+  min-width: 5.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.rsvp-reader-view .rr-hidden {
+  display: none;
+}
+
+.rsvp-reader-view.is-finished .rr-word {
+  opacity: 0.55;
+}
+
+/*
+ * Follow highlight in the note. A translucent accent tint so it reads as the
+ * reading cursor and never gets confused with the user's own ==highlights==
+ * (which keep the theme's --text-highlight-bg). Both mechanisms are overlays:
+ * the note's own content and marks are never modified. The plain
+ * --text-highlight-bg declaration is the fallback for engines without
+ * color-mix support.
+ */
+.rsvp-reader-active-sentence {
+  background-color: var(--text-highlight-bg);
+  background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
+  border-radius: 3px;
+}
+
+/* Reading-view variant, via the CSS Custom Highlight API (no DOM mutation). */
+::highlight(rsvp-reader-sentence) {
+  background-color: var(--text-highlight-bg);
+  background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
+}
+
+/*
+ * Typewriter padding: while "Follow in note" is active, pad the followed
+ * editor's content so any line, including the first and last, can scroll to the
+ * vertical center. Applied only to the followed CodeMirror editor.
+ */
+.rsvp-reader-follow-active .cm-content {
+  padding-top: 50vh;
+  padding-bottom: 50vh;
+}
