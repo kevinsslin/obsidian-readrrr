@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2]
+
+### Fixed
+
+- On phones, the speed bar and transport controls no longer sit underneath
+  Obsidian's floating navigation bar; the reader now leaves the same bottom
+  clearance Obsidian's own views use.
+
 ## [0.1.1]
 
 ### Changed
@@ -51,6 +59,7 @@ Initial release.
   and pacing, applied live to open reader panes.
 - Theme-aware styling for light and dark.
 
-[Unreleased]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.1...HEAD
+[Unreleased]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.2...HEAD
+[0.1.2]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.0...0.1.1
 [0.1.0]: https://github.com/kevinsslin/obsidian-rsvp-reader/releases/tag/0.1.0

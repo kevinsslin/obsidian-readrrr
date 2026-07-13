@@ -221,6 +221,24 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Mobile ------------------------------------------------------------------ */
+
+/*
+ * On phones the Obsidian navigation bar floats over the leaf content
+ * (position: fixed). Obsidian adds top clearance to every view for its fixed
+ * header but leaves the bottom to the view, so without this the speed bar and
+ * controls sit underneath the navigation bar. --view-bottom-spacing is
+ * Obsidian's own clearance for it (safe area + navbar height, and it goes
+ * negative while the navbar is hidden behind an open keyboard; max() keeps
+ * the base 1rem padding in that state). The selector mirrors the exact states
+ * where Obsidian sets the variable to a length; elsewhere it is a unitless 0,
+ * which would invalidate the calc() and zero the padding entirely.
+ */
+.is-phone.is-floating-nav .rsvp-reader-view,
+.is-phone.auto-full-screen .rsvp-reader-view {
+  padding-bottom: calc(1rem + max(0px, var(--view-bottom-spacing, 0px)));
+}
+
 .rsvp-reader-view .rr-hidden {
   display: none;
 }

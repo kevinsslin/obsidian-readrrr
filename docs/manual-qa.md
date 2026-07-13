@@ -43,5 +43,9 @@ checklist covers the parts that need a human in Obsidian.
 
 - [ ] The plugin loads on Obsidian mobile.
 - [ ] The reader displays and the controls are tappable at a comfortable size.
+- [ ] On a phone, the speed bar and controls sit fully above Obsidian's
+      floating navigation bar (nothing hides behind it). Check both the
+      floating and classic navigation bar styles, and on Android also with the
+      keyboard open and closed.
 - [ ] Narration starts when triggered by a tap (the play button or Voice toggle).
 - [ ] Word or sentence sync is acceptable with an on-device voice.
