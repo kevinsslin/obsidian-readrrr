@@ -35,6 +35,8 @@ checklist covers the parts that need a human in Obsidian.
       frontmatter. The reader should stay at the same anchored passage and retain
       its playing or paused state instead of resetting to the first word.
 - [ ] Dragging the speed bar changes the pace immediately; hiding it in settings works.
+- [ ] Every numeric slider in plugin settings shows its exact current value beside
+      the control at rest, and the readout updates immediately while dragging.
 - [ ] With **System voice** selected, turning on Voice narrates in sync; the
       display tracks word boundaries where available and resyncs each sentence.
 - [ ] With **Unreal Speech** selected and a valid API key, the first play waits

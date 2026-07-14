@@ -121,31 +121,35 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
       await this.plugin.saveSettings();
     };
 
-    new Setting(containerEl)
-      .setName("Reading speed")
-      .setDesc("Words per minute.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(100, 1000, 10)
-          .setValue(this.plugin.settings.wpm)
-          .onChange(async (value) => {
-            this.plugin.settings.wpm = value;
-            await save();
-          }),
-      );
+    this.addValueSlider({
+      containerEl,
+      name: "Reading speed",
+      desc: "Words per minute.",
+      value: this.plugin.settings.wpm,
+      min: 100,
+      max: 1000,
+      step: 10,
+      formatValue: (value) => `${value} WPM`,
+      onChange: async (value) => {
+        this.plugin.settings.wpm = value;
+        await save();
+      },
+    });
 
-    new Setting(containerEl)
-      .setName("Word size")
-      .setDesc("Font size of the flashed word, in pixels.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(24, 140, 2)
-          .setValue(this.plugin.settings.fontSize)
-          .onChange(async (value) => {
-            this.plugin.settings.fontSize = value;
-            await save();
-          }),
-      );
+    this.addValueSlider({
+      containerEl,
+      name: "Word size",
+      desc: "Font size of the flashed word, in pixels.",
+      value: this.plugin.settings.fontSize,
+      min: 24,
+      max: 140,
+      step: 2,
+      formatValue: (value) => `${value} px`,
+      onChange: async (value) => {
+        this.plugin.settings.fontSize = value;
+        await save();
+      },
+    });
 
     new Setting(containerEl)
       .setName("Show speed bar")
@@ -235,41 +239,99 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
       }
 
       const maxPitch = this.plugin.settings.ttsProvider === "unreal-speech" ? 1.5 : 2;
-      new Setting(containerEl)
-        .setName("Pitch")
-        .addSlider((slider) =>
-          slider
-            .setLimits(0.5, maxPitch, 0.1)
-            .setValue(Math.min(this.plugin.settings.pitch, maxPitch))
-            .onChange(async (value) => {
-              this.plugin.settings.pitch = value;
-              await save();
-            }),
-        );
+      this.addValueSlider({
+        containerEl,
+        name: "Pitch",
+        value: Math.min(this.plugin.settings.pitch, maxPitch),
+        min: 0.5,
+        max: maxPitch,
+        step: 0.1,
+        formatValue: (value) => `${value.toFixed(1)}×`,
+        onChange: async (value) => {
+          this.plugin.settings.pitch = value;
+          await save();
+        },
+      });
 
-      new Setting(containerEl)
-        .setName("Volume")
-        .addSlider((slider) =>
-          slider
-            .setLimits(0, 1, 0.05)
-            .setValue(this.plugin.settings.volume)
-            .onChange(async (value) => {
-              this.plugin.settings.volume = value;
-              await save();
-            }),
-        );
+      this.addValueSlider({
+        containerEl,
+        name: "Volume",
+        value: this.plugin.settings.volume,
+        min: 0,
+        max: 1,
+        step: 0.05,
+        formatValue: (value) => `${Math.round(value * 100)}%`,
+        onChange: async (value) => {
+          this.plugin.settings.volume = value;
+          await save();
+        },
+      });
     }
 
     this.displayNarrationCacheSettings(containerEl);
 
     new Setting(containerEl).setName("Pacing").setHeading();
 
-    this.addPacingSlider(containerEl, "Long-word threshold", "Word length past which extra time is added.", "longWordThreshold", 4, 16, 1);
-    this.addPacingSlider(containerEl, "Extra time per long character (ms)", "", "extraMsPerChar", 0, 60, 2);
-    this.addPacingSlider(containerEl, "Clause pause", "Dwell multiplier at commas, semicolons, colons.", "clauseMultiplier", 1, 3, 0.1);
-    this.addPacingSlider(containerEl, "Sentence pause", "Dwell multiplier at sentence ends.", "sentenceMultiplier", 1, 4, 0.1);
-    this.addPacingSlider(containerEl, "Paragraph pause", "Dwell multiplier at paragraph ends.", "paragraphMultiplier", 1, 5, 0.1);
-    this.addPacingSlider(containerEl, "Minimum word time (ms)", "Never show a word for less than this.", "minWordMs", 0, 200, 10);
+    this.addPacingSlider(
+      containerEl,
+      "Long-word threshold",
+      "Word length past which extra time is added.",
+      "longWordThreshold",
+      4,
+      16,
+      1,
+      (value) => `${value} chars`,
+    );
+    this.addPacingSlider(
+      containerEl,
+      "Extra time per long character (ms)",
+      "",
+      "extraMsPerChar",
+      0,
+      60,
+      2,
+      (value) => `${value} ms`,
+    );
+    this.addPacingSlider(
+      containerEl,
+      "Clause pause",
+      "Dwell multiplier at commas, semicolons, colons.",
+      "clauseMultiplier",
+      1,
+      3,
+      0.1,
+      (value) => `${value.toFixed(1)}×`,
+    );
+    this.addPacingSlider(
+      containerEl,
+      "Sentence pause",
+      "Dwell multiplier at sentence ends.",
+      "sentenceMultiplier",
+      1,
+      4,
+      0.1,
+      (value) => `${value.toFixed(1)}×`,
+    );
+    this.addPacingSlider(
+      containerEl,
+      "Paragraph pause",
+      "Dwell multiplier at paragraph ends.",
+      "paragraphMultiplier",
+      1,
+      5,
+      0.1,
+      (value) => `${value.toFixed(1)}×`,
+    );
+    this.addPacingSlider(
+      containerEl,
+      "Minimum word time (ms)",
+      "Never show a word for less than this.",
+      "minWordMs",
+      0,
+      200,
+      10,
+      (value) => `${value} ms`,
+    );
 
     new Setting(containerEl).addButton((button) =>
       button.setButtonText("Reset pacing to defaults").onClick(async () => {
@@ -422,6 +484,48 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
     this.voicesChangedHandler = null;
   }
 
+  private addValueSlider({
+    containerEl,
+    name,
+    desc,
+    value,
+    min,
+    max,
+    step,
+    formatValue,
+    onChange,
+  }: {
+    containerEl: HTMLElement;
+    name: string;
+    desc?: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    formatValue: (value: number) => string;
+    onChange: (value: number) => Promise<void>;
+  }): void {
+    const setting = new Setting(containerEl).setName(name);
+    if (desc) setting.setDesc(desc);
+
+    let valueEl: HTMLSpanElement | null = null;
+    setting.addSlider((slider) =>
+      slider
+        .setLimits(min, max, step)
+        .setValue(value)
+        .setDynamicTooltip()
+        .onChange(async (nextValue) => {
+          valueEl?.setText(formatValue(nextValue));
+          await onChange(nextValue);
+        }),
+    );
+    valueEl = setting.controlEl.createSpan({
+      cls: "rsvp-reader-slider-value",
+      text: formatValue(value),
+    });
+    valueEl.setAttr("aria-live", "polite");
+  }
+
   private addPacingSlider(
     containerEl: HTMLElement,
     name: string,
@@ -430,19 +534,23 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
     min: number,
     max: number,
     step: number,
+    formatValue: (value: number) => string,
   ): void {
-    const setting = new Setting(containerEl).setName(name);
-    if (desc) setting.setDesc(desc);
-    setting.addSlider((slider) =>
-      slider
-        .setLimits(min, max, step)
-        .setValue(this.plugin.settings[key] as number)
-        .onChange(async (value) => {
-          (this.plugin.settings[key] as number) = value;
-          this.plugin.refreshViews();
-          await this.plugin.saveSettings();
-        }),
-    );
+    this.addValueSlider({
+      containerEl,
+      name,
+      desc,
+      value: this.plugin.settings[key] as number,
+      min,
+      max,
+      step,
+      formatValue,
+      onChange: async (value) => {
+        (this.plugin.settings[key] as number) = value;
+        this.plugin.refreshViews();
+        await this.plugin.saveSettings();
+      },
+    });
   }
 
   private registerVoicesChanged(): void {

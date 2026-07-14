@@ -231,6 +231,23 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Settings sliders -------------------------------------------------------- */
+
+.rsvp-reader-slider-value {
+  box-sizing: border-box;
+  min-width: 4.75rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-normal);
+  background: var(--background-secondary-alt);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+}
+
 /* Mobile ------------------------------------------------------------------ */
 
 /*
