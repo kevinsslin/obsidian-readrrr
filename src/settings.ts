@@ -18,6 +18,8 @@ export interface RsvpReaderSettings {
   fontSize: number;
   showWpmBar: boolean;
   followInNote: boolean;
+  /** Flash the current word in the note whenever playback pauses. */
+  locateOnPause: boolean;
   resumeReadingPosition: boolean;
   skipCodeBlocks: boolean;
   skipFrontmatter: boolean;
@@ -43,6 +45,7 @@ export const DEFAULT_SETTINGS: RsvpReaderSettings = {
   fontSize: 64,
   showWpmBar: true,
   followInNote: true,
+  locateOnPause: true,
   resumeReadingPosition: true,
   skipCodeBlocks: true,
   skipFrontmatter: true,
@@ -167,6 +170,16 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.followInNote).onChange(async (value) => {
           this.plugin.settings.followInNote = value;
+          await save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Locate on pause")
+      .setDesc("When you pause, flash the current word in the note for a few seconds so you can see where you are.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.locateOnPause).onChange(async (value) => {
+          this.plugin.settings.locateOnPause = value;
           await save();
         }),
       );

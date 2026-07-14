@@ -98,6 +98,7 @@ export class RsvpView extends ItemView {
         const previousStatus = this.state.status;
         this.renderState(state);
         this.updateCheckpoint(state, previousStatus);
+        if (state.status === "paused" && previousStatus === "playing") this.onPaused();
       },
       onFinish: () => {
         this.root.addClass("is-finished");
@@ -886,6 +887,25 @@ export class RsvpView extends ItemView {
     }
     await save;
     this.root.focus(); // keep keyboard control on the reader
+  }
+
+  /**
+   * Pause auto-locate: flash the current word in the note that is already
+   * open, without opening or revealing anything (unlike the Locate button).
+   * On a phone the note tab is hidden behind the reader; the flash still
+   * positions and marks it, so switching to it lands on the right spot.
+   */
+  private onPaused(): void {
+    if (
+      !this.plugin.settings.locateOnPause ||
+      this.restoringCheckpoint ||
+      !this.sourceFile ||
+      this.state.total <= 0
+    ) {
+      return;
+    }
+    const view = this.sourceMarkdownView();
+    if (view) this.flashCurrentWord(view, false);
   }
 
   /**
