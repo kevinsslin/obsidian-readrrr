@@ -6,6 +6,55 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-15
+
+### Added
+
+- Natural cloud narration through Unreal Speech, the TTS engine used by Readwise
+  Reader. Users can choose the free system voice or supply their own Unreal
+  Speech API key and select from its multilingual voice catalog.
+- Exact word synchronization for cloud narration from provider-supplied audio
+  timestamps, with startup buffering, rolling prefetch, and layered caches.
+- Device-local persistent narration caching through IndexedDB, with configurable
+  storage limits, LRU eviction, usage statistics, and a clear-cache control.
+- Automatic per-note reading checkpoints that resume after reopening a note and
+  survive note edits through source offsets, token anchors, and progress fallback.
+- Live book statistics for word count, completion percentage, remaining time at
+  the current WPM, and estimated 128 kbps narration size.
+
+### Changed
+
+- Unreal Speech now groups short sentences into larger chunks, buffers two
+  chunks before starting, and keeps a two-chunk lookahead so high-WPM playback
+  does not pause at every network boundary.
+- Pausing narration now preserves and resumes the active audio session instead
+  of synthesizing the same text again.
+- Unreal Speech API keys now use Obsidian SecretStorage exclusively. Legacy
+  plaintext keys migrate once and are removed from normal plugin data. This
+  raises the minimum supported Obsidian version to 1.11.4.
+- The session narration cache is byte-bounded at 64 MB on desktop and 32 MB on
+  mobile. Persistent cache statistics and LRU eviction now use compact metadata
+  without loading or rewriting the stored MP3 collection.
+- Unreal Speech can use the full 1000 WPM setting through 5x HTML audio playback,
+  while System voice keeps its existing 4x safety limit.
+- Periodic checkpoint saves are coalesced and less frequent, while pause, close,
+  note switch, restart, and completion still persist or clear immediately.
+- Narration failures now show a notice while the visual reader continues on its
+  estimated clock.
+
+### Fixed
+
+- Clearing narration storage or turning the cache off now clears memory and
+  IndexedDB together, and in-flight synthesis cannot repopulate storage afterward.
+- Provider text offsets now take precedence over ambiguous spoken-text matching,
+  keeping normalized forms such as numbers aligned with the original token.
+- Exact-timestamp playback stays frozen during the short seek-restart debounce
+  instead of letting the estimated clock skip ahead.
+- Changing code-block or frontmatter filtering in an open reader preserves the
+  current anchored position rather than resetting to the first word.
+- Corrupt or non-finite checkpoint and narration-cache records are rejected before
+  they can reach playback or restore logic.
+
 ## [0.1.2]
 
 ### Fixed
@@ -59,7 +108,8 @@ Initial release.
   and pacing, applied live to open reader panes.
 - Theme-aware styling for light and dark.
 
-[Unreleased]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.2...HEAD
+[Unreleased]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.2...0.2.0
 [0.1.2]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/kevinsslin/obsidian-rsvp-reader/compare/0.1.0...0.1.1
 [0.1.0]: https://github.com/kevinsslin/obsidian-rsvp-reader/releases/tag/0.1.0

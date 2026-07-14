@@ -94,8 +94,13 @@ export class WebSpeechProvider implements TtsProvider {
       events.onEnd?.();
       return NOOP_SESSION;
     }
+    const startIndex = Math.max(0, Math.min(tokens.length, opts.startTokenIndex ?? 0));
+    if (startIndex >= tokens.length) {
+      events.onEnd?.();
+      return NOOP_SESSION;
+    }
 
-    const utterances = buildUtterances(tokens, {
+    const utterances = buildUtterances(tokens.slice(startIndex), {
       maxTokensPerChunk: opts.maxTokensPerChunk,
     });
     const voice = this.resolveVoice(synth, opts.voiceId);
@@ -119,13 +124,13 @@ export class WebSpeechProvider implements TtsProvider {
         if (stopped) return;
         if (ev.name && ev.name !== "word") return;
         const rel = charIndexToRelToken(chunk.charStarts, ev.charIndex);
-        events.onWordSpoken?.(chunk.tokenStart + rel);
+        events.onWordSpoken?.(startIndex + chunk.tokenStart + rel);
       };
       utterance.onend = () => {
         if (stopped) return;
         index++;
         if (index < utterances.length) {
-          events.onSentenceEnd?.(utterances[index].tokenStart);
+          events.onSentenceEnd?.(startIndex + utterances[index].tokenStart);
           speakNext();
         } else {
           events.onEnd?.();

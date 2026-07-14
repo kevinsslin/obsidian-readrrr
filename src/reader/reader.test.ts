@@ -57,8 +57,11 @@ class FakeProvider implements TtsProvider {
   events: TtsEvents | null = null;
   spokenTokens: Token[] | null = null;
   stopped = 0;
+  paused = 0;
+  resumed = 0;
   speakCount = 0;
   lastRate = 0;
+  lastStartTokenIndex = 0;
   isAvailable(): boolean {
     return true;
   }
@@ -70,14 +73,23 @@ class FakeProvider implements TtsProvider {
     this.spokenTokens = tokens;
     this.speakCount++;
     this.lastRate = opts.rate;
+    this.lastStartTokenIndex = opts.startTokenIndex ?? 0;
     return {
-      pause: () => {},
-      resume: () => {},
+      pause: () => {
+        this.paused++;
+      },
+      resume: () => {
+        this.resumed++;
+      },
       stop: () => {
         this.stopped++;
       },
     };
   }
+}
+
+class ExactFakeProvider extends FakeProvider {
+  readonly exactWordTimings = true;
 }
 
 const SPEAK: SpeakOptions = { voiceId: null, rate: 1, pitch: 1, volume: 1 };
@@ -179,6 +191,14 @@ describe("Reader: silent playback", () => {
     expect(reader.getState().index).toBe(3);
   });
 
+  it("loads a restored position as paused without starting playback", () => {
+    reader.load(fiveWords(), TIMING, { index: 3, status: "paused" });
+    expect(rendered).toEqual([3]);
+    expect(reader.getState()).toMatchObject({ status: "paused", index: 3, total: 5 });
+    clock.advance(5_000);
+    expect(reader.getState()).toMatchObject({ status: "paused", index: 3 });
+  });
+
   it("stops and resets to the first word", () => {
     reader.load(fiveWords(), TIMING);
     reader.play();
@@ -257,7 +277,32 @@ describe("Reader: narration resync", () => {
     expect(rendered).toContain(3);
   });
 
-  it("stops the TTS session on pause and stop", () => {
+  it("lets exact provider timestamps own every visual word transition", () => {
+    const clock = new FakeClock();
+    const reader = new Reader(clock);
+    const provider = new ExactFakeProvider();
+    reader.load(
+      [tok("one"), tok("two"), tok("three.", { endsSentence: true })],
+      TIMING,
+    );
+    reader.setNarration({ provider, speak: SPEAK });
+    reader.play();
+
+    clock.advance(60_000);
+    expect(reader.getState()).toMatchObject({ status: "playing", index: 0 });
+
+    provider.events!.onWordSpoken!(1);
+    expect(reader.getState().index).toBe(1);
+    clock.advance(60_000);
+    expect(reader.getState().index).toBe(1);
+
+    provider.events!.onWordSpoken!(2);
+    expect(reader.getState().index).toBe(2);
+    provider.events!.onEnd!();
+    expect(reader.getState().status).toBe("finished");
+  });
+
+  it("pauses and resumes the TTS session without synthesizing again", () => {
     const clock = new FakeClock();
     const reader = new Reader(clock);
     const provider = new FakeProvider();
@@ -266,11 +311,36 @@ describe("Reader: narration resync", () => {
 
     reader.play();
     reader.pause();
+    expect(provider.paused).toBe(1);
+    expect(provider.stopped).toBe(0);
+
+    reader.play();
+    expect(provider.resumed).toBe(1);
+    expect(provider.speakCount).toBe(1);
+    reader.stop();
+    expect(provider.stopped).toBe(1);
+  });
+
+  it("drops paused audio when seeking and restarts from the new token", () => {
+    const clock = new FakeClock();
+    const reader = new Reader(clock);
+    const provider = new FakeProvider();
+    reader.load([tok("one"), tok("two"), tok("three.", { endsSentence: true })], TIMING);
+    reader.setNarration({ provider, speak: SPEAK });
+
+    reader.play();
+    reader.pause();
+    reader.seekToIndex(2);
     expect(provider.stopped).toBe(1);
 
     reader.play();
-    reader.stop();
-    expect(provider.stopped).toBe(2);
+    expect(provider.speakCount).toBe(2);
+    expect(provider.spokenTokens?.map((token) => token.text)).toEqual([
+      "one",
+      "two",
+      "three.",
+    ]);
+    expect(provider.lastStartTokenIndex).toBe(2);
   });
 
   it("never cuts off audio: waits at sentence boundaries and only audio finishes", () => {
@@ -392,12 +462,16 @@ describe("Reader: narration resync", () => {
     expect(finished).toBe(true);
   });
 
-  it("falls back to the estimated clock when narration errors", () => {
+  it("reports narration errors and falls back to the estimated clock", () => {
     const clock = new FakeClock();
     const reader = new Reader(clock);
-    const provider = new FakeProvider();
+    const provider = new ExactFakeProvider();
     let finished = false;
-    reader.setListeners({ onFinish: () => (finished = true) });
+    const errors: string[] = [];
+    reader.setListeners({
+      onFinish: () => (finished = true),
+      onNarrationError: (error) => errors.push(error.message),
+    });
     reader.load(
       [tok("one"), tok("two"), tok("three.", { endsSentence: true })],
       TIMING,
@@ -406,6 +480,7 @@ describe("Reader: narration resync", () => {
     reader.play();
 
     provider.events!.onError!(new Error("voice failed"));
+    expect(errors).toEqual(["voice failed"]);
     clock.advance(5_000); // estimated clock now owns the run and finishes it
     expect(finished).toBe(true);
     expect(reader.getState().status).toBe("finished");
@@ -446,6 +521,21 @@ describe("Reader: narration resync", () => {
     expect(provider.stopped).toBe(0);
   });
 
+  it("applies narration setting changes made while paused on the next play", () => {
+    const reader = new Reader(new FakeClock());
+    const provider = new FakeProvider();
+    reader.load([tok("one"), tok("two.", { endsSentence: true })], TIMING);
+    reader.setNarration({ provider, speak: SPEAK });
+    reader.play();
+    reader.pause();
+
+    reader.setNarration({ provider, speak: { ...SPEAK, rate: 1.5 } });
+    expect(provider.stopped).toBe(1);
+    reader.play();
+    expect(provider.speakCount).toBe(2);
+    expect(provider.lastRate).toBe(1.5);
+  });
+
   it("coalesces a burst of seeks into a single narration restart", () => {
     const clock = new FakeClock();
     const reader = new Reader(clock);
@@ -474,7 +564,34 @@ describe("Reader: narration resync", () => {
 
     clock.advance(250); // quiet period elapses
     expect(provider.speakCount).toBe(2); // exactly one restart
-    expect(provider.spokenTokens?.[0]?.text).toBe("four"); // from the last seek
+    expect(provider.spokenTokens?.[0]?.text).toBe("one"); // stable full-document chunks
+    expect(provider.lastStartTokenIndex).toBe(3); // resumes from the last seek
+  });
+
+  it("freezes exact narration while a seek restart is pending", () => {
+    const clock = new FakeClock();
+    const reader = new Reader(clock);
+    const provider = new ExactFakeProvider();
+    reader.load(
+      [tok("one"), tok("two"), tok("three"), tok("four"), tok("five.", { endsSentence: true })],
+      TIMING,
+    );
+    reader.setNarration({ provider, speak: SPEAK });
+    reader.play();
+
+    reader.seekToIndex(2);
+    clock.advance(199);
+    expect(reader.getState()).toMatchObject({ status: "playing", index: 2 });
+    expect(provider.speakCount).toBe(1);
+
+    clock.advance(1);
+    expect(provider.speakCount).toBe(2);
+    expect(provider.lastStartTokenIndex).toBe(2);
+    clock.advance(10_000);
+    expect(reader.getState().index).toBe(2);
+
+    provider.events!.onWordSpoken!(3);
+    expect(reader.getState().index).toBe(3);
   });
 
   it("restarts narration at the new rate when re-set while playing", () => {
@@ -495,7 +612,7 @@ describe("Reader: narration resync", () => {
     expect(provider.lastRate).toBe(2); // at the new rate
   });
 
-  it("ignores events from a session stopped by pause (no stale finish/snap)", () => {
+  it("does not finish or snap when provider events race with pause", () => {
     const clock = new FakeClock();
     const reader = new Reader(clock);
     const provider = new FakeProvider();
@@ -509,7 +626,8 @@ describe("Reader: narration resync", () => {
     reader.pause();
     const indexAfterPause = reader.getState().index;
 
-    // A late event from the stopped session must be ignored.
+    // A late end event must preserve the requested pause and exhaust the
+    // session; later callbacks from it are then stale.
     staleEvents.onEnd!();
     expect(finished).toBe(false);
     expect(reader.getState().status).toBe("paused");

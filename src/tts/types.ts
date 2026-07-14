@@ -19,6 +19,8 @@ export interface SpeakOptions {
   volume: number;
   /** Cap tokens per spoken chunk so long paragraphs still resync often. */
   maxTokensPerChunk?: number;
+  /** Begin inside the full token array while preserving stable chunk boundaries. */
+  startTokenIndex?: number;
 }
 
 export const DEFAULT_SPEAK_OPTIONS: SpeakOptions = {
@@ -27,18 +29,18 @@ export const DEFAULT_SPEAK_OPTIONS: SpeakOptions = {
   pitch: 1,
   volume: 1,
   maxTokensPerChunk: 40,
+  startTokenIndex: 0,
 };
 
 /**
- * Events a provider emits during playback. Token indices are RELATIVE to the
- * token array passed to `speak()` (0-based within that array); the Reader adds
- * its own start offset. The Reader consumes these to keep the display in sync
- * with audio.
+ * Events a provider emits during playback. Token indices are document-absolute
+ * positions in the full array passed to `speak()`, including when playback starts
+ * from a nonzero `startTokenIndex`.
  */
 export interface TtsEvents {
-  /** Word-boundary fired for this (relative) token; fine sync, may not fire. */
+  /** Word-boundary fired for this absolute token; fine sync, may not fire. */
   onWordSpoken?(tokenIndex: number): void;
-  /** A spoken chunk finished; the next chunk starts at this (relative) token. */
+  /** A spoken chunk finished; the next chunk starts at this absolute token. */
   onSentenceEnd?(nextTokenIndex: number): void;
   /** All chunks finished. */
   onEnd?(): void;
@@ -54,6 +56,8 @@ export interface TtsSession {
 export interface TtsProvider {
   readonly id: string;
   readonly name: string;
+  /** True when every spoken word has a provider timestamp. */
+  readonly exactWordTimings?: boolean;
   isAvailable(): boolean;
   listVoices(): TtsVoice[];
   speak(tokens: Token[], opts: SpeakOptions, events: TtsEvents): TtsSession;

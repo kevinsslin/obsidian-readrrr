@@ -52,8 +52,8 @@ class PluginStub extends Component {
   registerView(type, factory) { this.views[type] = factory; }
   registerEditorExtension() {}
   addSettingTab(tab) { this.settingTabs.push(tab); }
-  async loadData() { return null; }
-  async saveData() {}
+  async loadData() { return { unrealApiKey: "legacy-test-key" }; }
+  async saveData(data) { this.savedData = data; }
 }
 class ItemViewStub extends Component {
   constructor(leaf) {
@@ -69,6 +69,14 @@ class PluginSettingTabStub {
     this.plugin = plugin;
     this.containerEl = fakeEl();
   }
+}
+class ModalStub {
+  constructor(app) {
+    this.app = app;
+    this.contentEl = fakeEl();
+  }
+  open() {}
+  close() {}
 }
 const chain = () => new Proxy(() => chain(), { get: () => chain() });
 class SettingStub {
@@ -86,8 +94,11 @@ const obsidianStub = {
   ItemView: ItemViewStub,
   PluginSettingTab: PluginSettingTabStub,
   Setting: SettingStub,
+  Modal: ModalStub,
   Notice: class {},
   MarkdownView: class {},
+  TFile: class {},
+  Platform: { isMobile: false },
   WorkspaceLeaf: class {},
   setIcon: () => {},
 };
@@ -113,7 +124,12 @@ const require = createRequire(import.meta.url);
 const mod = require(cjs);
 const PluginClass = mod.default ?? mod;
 
+const secrets = new Map();
 const app = {
+  secretStorage: {
+    getSecret: (id) => secrets.get(id) ?? null,
+    setSecret: (id, value) => secrets.set(id, value),
+  },
   workspace: {
     getLeavesOfType: () => [],
     getLeaf: () => ({ setViewState: async () => {}, view: null }),
@@ -121,7 +137,7 @@ const app = {
     getActiveViewOfType: () => null,
     getActiveFile: () => null,
   },
-  vault: { read: async () => "" },
+  vault: { read: async () => "", on: () => ({}) },
 };
 
 const plugin = new PluginClass(app, { id: "rsvp-reader", version: "0.1.0" });
@@ -138,6 +154,12 @@ for (const id of ["read-current-note", "read-selection", "open-reader"]) {
 if (!Object.keys(plugin.views).includes("rsvp-reader-view")) problems.push("view not registered");
 if (plugin.ribbons.length === 0) problems.push("no ribbon icon");
 if (plugin.settingTabs.length === 0) problems.push("no settings tab");
+if (secrets.get("rsvp-reader-unreal-api-key") !== "legacy-test-key") {
+  problems.push("legacy API key not migrated to SecretStorage");
+}
+if (Object.hasOwn(plugin.savedData ?? {}, "unrealApiKey")) {
+  problems.push("API key remained in plugin data");
+}
 
 if (problems.length) {
   console.error("load smoke FAILED:", problems.join("; "));

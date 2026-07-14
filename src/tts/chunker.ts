@@ -17,24 +17,38 @@ export interface Utterance {
 }
 
 /**
- * Group tokens into utterances, breaking at sentence/paragraph ends and never
- * exceeding `maxTokensPerChunk` (so a run-on paragraph still resyncs often).
+ * Group tokens into utterances without exceeding token or character caps.
+ * `minCharsPerChunk` lets cloud providers combine short sentences, then prefer
+ * the next sentence/paragraph boundary once enough text has accumulated.
  */
 export function buildUtterances(
   tokens: Token[],
-  opts: { maxTokensPerChunk?: number } = {},
+  opts: {
+    maxTokensPerChunk?: number;
+    maxCharsPerChunk?: number;
+    minCharsPerChunk?: number;
+  } = {},
 ): Utterance[] {
-  const max = Math.max(1, opts.maxTokensPerChunk ?? 40);
+  const maxTokens = Math.max(1, opts.maxTokensPerChunk ?? 40);
+  const maxChars = Math.max(1, opts.maxCharsPerChunk ?? Number.POSITIVE_INFINITY);
+  const minChars = Math.min(maxChars, Math.max(0, opts.minCharsPerChunk ?? 0));
   const utterances: Utterance[] = [];
   let start = 0;
 
   while (start < tokens.length) {
     let end = start;
+    let charCount = 0;
     while (end < tokens.length) {
       const token = tokens[end];
+      const nextCharCount = charCount + (end > start ? 1 : 0) + token.text.length;
+      // Keep provider requests under their character limit. A single oversized
+      // token is left intact so token indices remain meaningful; the provider
+      // can reject it with a useful limit error instead of splitting one word.
+      if (end > start && nextCharCount > maxChars) break;
+      charCount = nextCharCount;
       end++;
-      if (token.endsSentence || token.endsParagraph) break;
-      if (end - start >= max) break;
+      if (end - start >= maxTokens) break;
+      if ((token.endsSentence || token.endsParagraph) && charCount >= minChars) break;
     }
 
     const chunk = tokens.slice(start, end);

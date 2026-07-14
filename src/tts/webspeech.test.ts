@@ -125,6 +125,16 @@ describe("WebSpeechProvider", () => {
     expect(synth.spoken).toHaveLength(2);
   });
 
+  it("starts from an offset while keeping event indexes document-relative", () => {
+    const words: number[] = [];
+    makeProvider(synth).speak(TWO_SENTENCES, { ...OPTS, startTokenIndex: 4 }, {
+      onWordSpoken: (index) => words.push(index),
+    });
+    expect(synth.spoken[0].text).toBe("five.");
+    synth.spoken[0].onboundary!({ charIndex: 0, name: "word" });
+    expect(words).toEqual([4]);
+  });
+
   it("ignores non-word boundaries", () => {
     const words: number[] = [];
     makeProvider(synth).speak(TWO_SENTENCES, OPTS, { onWordSpoken: (i) => words.push(i) });

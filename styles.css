@@ -17,6 +17,16 @@
   background-color: var(--background-primary);
 }
 
+.rsvp-reader-view .rr-book-stats {
+  flex: 0 0 auto;
+  min-height: 1.2em;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.3;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Word stage ------------------------------------------------------------- */
 
 .rsvp-reader-view .rr-stage {

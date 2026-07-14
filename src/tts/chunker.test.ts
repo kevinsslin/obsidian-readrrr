@@ -38,11 +38,46 @@ describe("buildUtterances", () => {
     expect(u.map((x) => x.text)).toEqual(["A", "B"]);
   });
 
+  it("combines short sentences until the minimum cloud chunk size", () => {
+    const tokens = [
+      tok("One"),
+      tok("two.", { endsSentence: true }),
+      tok("Three"),
+      tok("four.", { endsSentence: true }),
+      tok("Five"),
+      tok("six.", { endsSentence: true }),
+    ];
+    const u = buildUtterances(tokens, { minCharsPerChunk: 10 });
+    expect(u.map((x) => x.text)).toEqual(["One two. Three four.", "Five six."]);
+    expect(u.map((x) => x.tokenStart)).toEqual([0, 4]);
+  });
+
+  it("uses a hard character cap even before the preferred boundary size", () => {
+    const tokens = [
+      tok("One"),
+      tok("two.", { endsSentence: true }),
+      tok("Three"),
+      tok("four.", { endsSentence: true }),
+    ];
+    const u = buildUtterances(tokens, {
+      minCharsPerChunk: 20,
+      maxCharsPerChunk: 12,
+    });
+    expect(u.map((x) => x.text)).toEqual(["One two.", "Three four."]);
+  });
+
   it("caps chunk size at maxTokensPerChunk", () => {
     const tokens = [tok("a"), tok("b"), tok("c"), tok("d"), tok("e")];
     const u = buildUtterances(tokens, { maxTokensPerChunk: 2 });
     expect(u.map((x) => x.tokenCount)).toEqual([2, 2, 1]);
     expect(u.map((x) => x.tokenStart)).toEqual([0, 2, 4]);
+  });
+
+  it("caps chunk text without splitting a token", () => {
+    const tokens = [tok("one"), tok("two"), tok("three"), tok("oversized")];
+    const u = buildUtterances(tokens, { maxCharsPerChunk: 7 });
+    expect(u.map((x) => x.text)).toEqual(["one two", "three", "oversized"]);
+    expect(u.map((x) => x.tokenStart)).toEqual([0, 2, 3]);
   });
 
   it("returns nothing for no tokens", () => {

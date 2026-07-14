@@ -1,14 +1,3 @@
-import type { TtsProvider } from "./types";
-import { WebSpeechProvider } from "./webspeech";
-
-/** All TTS providers usable in the current runtime. */
-export function availableProviders(): TtsProvider[] {
-  const providers: TtsProvider[] = [];
-  const webSpeech = new WebSpeechProvider();
-  if (webSpeech.isAvailable()) providers.push(webSpeech);
-  return providers;
-}
-
 export type {
   TtsProvider,
   TtsSession,
@@ -20,6 +9,25 @@ export type {
 } from "./types";
 export { DEFAULT_SPEAK_OPTIONS } from "./types";
 export { WebSpeechProvider } from "./webspeech";
+export { UnrealSpeechProvider, UNREAL_DEFAULT_BASE_URL } from "./unreal";
+export type { UnrealHttp, UnrealSpeechConfig } from "./unreal";
+export { TimedAudioSession, mapWordsToTokens } from "./timed-audio";
+export type {
+  SynthesizedChunk,
+  AudioLike,
+  TimedAudioDeps,
+  TimedAudioSessionConfig,
+} from "./timed-audio";
 export { buildUtterances, charIndexToRelToken } from "./chunker";
 export type { Utterance } from "./chunker";
 export { wpmToRate, clamp } from "./rate";
+export {
+  IndexedDbNarrationCache,
+  persistentCacheKey,
+  requestPersistentStorage,
+} from "./persistent-cache";
+export type {
+  PersistentNarrationCache,
+  NarrationCacheStats,
+  PersistentCacheKeyOptions,
+} from "./persistent-cache";

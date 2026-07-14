@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clamp, wpmToRate } from "./rate";
+import { clamp, wpmToRate, wpmToTimedAudioRate } from "./rate";
 
 describe("clamp", () => {
   it("bounds a value into range", () => {
@@ -19,5 +19,15 @@ describe("wpmToRate", () => {
     expect(wpmToRate(100)).toBe(0.5);
     expect(wpmToRate(400)).toBe(2);
     expect(wpmToRate(5000)).toBe(4);
+  });
+});
+
+describe("wpmToTimedAudioRate", () => {
+  it("maps the full 1000 wpm UI range onto HTML audio", () => {
+    expect(wpmToTimedAudioRate(100)).toBe(0.5);
+    expect(wpmToTimedAudioRate(200)).toBe(1);
+    expect(wpmToTimedAudioRate(800)).toBe(4);
+    expect(wpmToTimedAudioRate(1000)).toBe(5);
+    expect(wpmToTimedAudioRate(5000)).toBe(5);
   });
 });

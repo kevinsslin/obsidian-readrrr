@@ -23,6 +23,8 @@ export interface ReaderListeners {
   onState?(state: ReaderState): void;
   /** Reached the end. */
   onFinish?(): void;
+  /** Narration audio failed; reading continues silently on the estimate. */
+  onNarrationError?(err: Error): void;
 }
 
 export interface NarrationConfig {
@@ -31,11 +33,10 @@ export interface NarrationConfig {
 }
 
 /**
- * Drives the RSVP display. It always advances the visual word from an estimated
- * timeline using its clock; when narration is enabled it also starts a TTS
- * session and snaps the display to the provider's word/sentence events so audio
- * stays the master clock. DOM-free: it emits words through `onWord` and lets
- * the view render them.
+ * Drives the RSVP display. Silent reading and best-effort TTS advance from an
+ * estimated timeline; timestamped providers drive every word directly. Provider
+ * events keep audio as the master clock in either mode. DOM-free: it emits words
+ * through `onWord` and lets the view render them.
  */
 export class Reader {
   private readonly clock: Clock;
@@ -57,6 +58,8 @@ export class Reader {
   private sessionSeq = 0;
   /** True while the estimate waits at a sentence boundary for the audio. */
   private parked = false;
+  /** True while exact provider timestamps, rather than the estimate, drive words. */
+  private exactWaiting = false;
   /** Pending coalesced narration restart (after a burst of seeks). */
   private restartTimer: number | null = null;
 
@@ -68,15 +71,22 @@ export class Reader {
     this.listeners = listeners;
   }
 
-  /** Load new content, reset to the first word, and stay idle. */
-  load(tokens: Token[], timing: TimingOptions): void {
+  /** Load new content at an optional restored position without starting audio. */
+  load(
+    tokens: Token[],
+    timing: TimingOptions,
+    restored?: { index: number; status: "idle" | "paused" },
+  ): void {
     this.stopInternal();
     this.tokens = tokens;
     this.timeline = buildTimeline(tokens, timing);
-    this.status = "idle";
-    this.currentIndex = 0;
-    this.baseElapsed = 0;
-    if (this.timeline.length > 0) this.renderIndex(0);
+    const index = this.timeline.length > 0
+      ? Math.min(Math.max(0, Math.round(restored?.index ?? 0)), this.timeline.length - 1)
+      : 0;
+    this.status = this.timeline.length > 0 ? (restored?.status ?? "idle") : "idle";
+    this.currentIndex = index;
+    this.baseElapsed = this.timeline[index]?.startMs ?? 0;
+    if (this.timeline.length > 0) this.renderIndex(index);
     this.emitState();
   }
 
@@ -92,6 +102,13 @@ export class Reader {
     const idx = Math.min(Math.max(0, this.currentIndex), this.tokens.length - 1);
     this.timeline = buildTimeline(this.tokens, timing);
     this.currentIndex = idx;
+    if (this.exactWaiting) {
+      // Exact providers own every word transition. Keep the frozen estimate at
+      // the displayed word while its audio continues on provider timestamps.
+      this.baseElapsed = this.timeline[idx].startMs;
+      this.segmentStart = this.clock.now();
+      return;
+    }
     if (this.parked) {
       // Still waiting for the audio at a sentence boundary: stay parked, with
       // the frozen estimate re-anchored to the boundary under the new timing.
@@ -109,11 +126,11 @@ export class Reader {
     }
   }
 
-  /** Enable or disable narration; applies immediately if playing. */
+  /** Enable or disable narration; applies immediately if playing or paused. */
   setNarration(config: NarrationConfig | null): void {
     const prev = this.narration;
     this.narration = config;
-    if (this.status !== "playing") return;
+    if (this.status !== "playing" && this.status !== "paused") return;
 
     // Restart the audio only when something audible actually changed. Spurious
     // restarts are not just wasteful: rapid speechSynthesis cancel/speak cycles
@@ -132,10 +149,12 @@ export class Reader {
     if (!config && !prev && !this.session) return;
 
     this.stopSession();
-    this.startSession();
-    // The loop may have been parked at a sentence boundary waiting for the
-    // old audio; re-anchor at the current word and restart the ticks.
-    this.resumeEstimatedFrom(this.currentIndex);
+    if (this.status === "playing") {
+      this.startSession();
+      // The loop may have been parked at a sentence boundary waiting for the
+      // old audio; re-anchor at the current word and restart the ticks.
+      this.resumeEstimatedFrom(this.currentIndex);
+    }
   }
 
   getState(): ReaderState {
@@ -153,7 +172,8 @@ export class Reader {
     this.status = "playing";
     this.runEpoch++;
     this.segmentStart = this.clock.now();
-    this.startSession();
+    if (this.session) this.session.resume();
+    else this.startSession();
     this.scheduleTick();
     this.emitState();
   }
@@ -162,11 +182,12 @@ export class Reader {
     if (this.status !== "playing") return;
     this.baseElapsed = this.currentElapsed();
     this.parked = false;
+    this.exactWaiting = false;
     this.status = "paused";
     this.runEpoch++;
     this.clearTimer();
     this.clearRestartTimer();
-    this.stopSession();
+    this.session?.pause();
     this.emitState();
   }
 
@@ -187,6 +208,7 @@ export class Reader {
     const idx = Math.min(Math.max(0, index), this.timeline.length - 1);
     this.runEpoch++;
     this.parked = false;
+    this.exactWaiting = false;
     this.baseElapsed = this.timeline[idx].startMs;
     this.renderIndex(idx);
     if (this.status === "playing") {
@@ -198,6 +220,10 @@ export class Reader {
       this.scheduleSessionRestart();
       this.clearTimer();
       this.scheduleTick();
+    } else if (this.status === "paused") {
+      // A paused cloud session still points at the old audio position. Drop it;
+      // the next play starts narration from the newly sought token.
+      this.stopSession();
     } else if (this.status === "finished") {
       this.status = "paused";
     }
@@ -218,9 +244,9 @@ export class Reader {
 
   private currentElapsed(): number {
     if (this.status === "playing") {
-      // While parked the estimate is frozen at the boundary, so wall time does
-      // not inflate the position while we wait for the audio.
-      if (this.parked) return this.baseElapsed;
+      // While waiting on an audio boundary or exact word timestamp, freeze the
+      // estimate so wall time cannot move the visual ahead of narration.
+      if (this.parked || this.exactWaiting) return this.baseElapsed;
       return this.baseElapsed + (this.clock.now() - this.segmentStart);
     }
     return this.baseElapsed;
@@ -229,6 +255,7 @@ export class Reader {
   /** Re-anchor the estimated clock at `index` and restart the tick loop. */
   private resumeEstimatedFrom(index: number): void {
     this.parked = false;
+    this.exactWaiting = false;
     const entry = this.timeline[Math.max(0, Math.min(index, this.timeline.length - 1))];
     this.baseElapsed = entry ? entry.startMs : 0;
     this.segmentStart = this.clock.now();
@@ -241,6 +268,18 @@ export class Reader {
     // Defensive: never allow two live timers (e.g. a synchronous provider
     // error scheduling a resume while play() is still mid-flight).
     this.clearTimer();
+    if (
+      this.narration?.provider.exactWordTimings &&
+      (this.session !== null || this.restartTimer !== null)
+    ) {
+      // Timestamped audio owns each word transition. Stay frozen both while a
+      // session is active and during the short seek-restart debounce, otherwise
+      // the estimated clock can skip words before replacement audio starts.
+      this.parked = false;
+      this.exactWaiting = true;
+      return;
+    }
+    this.exactWaiting = false;
     const epoch = this.runEpoch;
     const elapsed = this.currentElapsed();
     const idx = indexAtMs(this.timeline, elapsed);
@@ -281,35 +320,44 @@ export class Reader {
   private startSession(): void {
     if (!this.narration) return;
     const startIndex = this.currentIndex;
-    const slice = this.tokens.slice(startIndex);
     // Tag this session; ignore events from a session that was later stopped or
     // superseded (even synchronously, from inside speak()).
     const seq = ++this.sessionSeq;
     const isCurrent = () => seq === this.sessionSeq;
-    const session = this.narration.provider.speak(slice, this.narration.speak, {
-      onWordSpoken: (rel) => {
-        if (isCurrent()) this.snapTo(startIndex + rel);
+    const session = this.narration.provider.speak(
+      this.tokens,
+      { ...this.narration.speak, startTokenIndex: startIndex },
+      {
+        onWordSpoken: (index) => {
+          if (isCurrent()) this.snapTo(index);
+        },
+        onSentenceEnd: (index) => {
+          if (isCurrent()) this.snapTo(index);
+        },
+        onEnd: () => {
+          if (!isCurrent()) return;
+          if (this.status === "paused") {
+            // A provider may deliver an end event racing with pause. Do not turn a
+            // user-requested pause into "finished"; discard the exhausted session
+            // so the next play restarts cleanly from the displayed word.
+            this.stopSession();
+            return;
+          }
+          if (this.status === "playing") this.finish();
+        },
+        onError: (err) => {
+          if (!isCurrent()) return;
+          // Audio failed: drop the session (so the sentence cap no longer
+          // applies) and let the estimated clock carry the run silently.
+          this.sessionSeq++;
+          const failed = this.session;
+          this.session = null;
+          failed?.stop();
+          if (this.status === "playing") this.resumeEstimatedFrom(this.currentIndex);
+          this.listeners.onNarrationError?.(err);
+        },
       },
-      onSentenceEnd: (rel) => {
-        if (isCurrent()) this.snapTo(startIndex + rel);
-      },
-      onEnd: () => {
-        if (isCurrent()) this.finish();
-      },
-      onError: () => {
-        if (!isCurrent()) return;
-        // Audio failed: drop the session (so the sentence cap no longer
-        // applies) and let the estimated clock carry the run silently.
-        this.sessionSeq++;
-        const failed = this.session;
-        this.session = null;
-        failed?.stop();
-        if (this.status === "playing") {
-          this.clearTimer();
-          this.scheduleTick();
-        }
-      },
-    });
+    );
     if (!isCurrent()) {
       // A callback finished or superseded the run synchronously during speak().
       session.stop();
@@ -321,6 +369,7 @@ export class Reader {
   private stopSession(): void {
     // Bump the sequence first so any in-flight callbacks are ignored.
     this.sessionSeq++;
+    this.exactWaiting = false;
     if (this.session) {
       this.session.stop();
       this.session = null;
@@ -349,6 +398,7 @@ export class Reader {
     if (this.status !== "playing") return;
     if (index < 0 || index >= this.timeline.length) return;
     this.parked = false;
+    this.exactWaiting = false;
     this.baseElapsed = this.timeline[index].startMs;
     this.segmentStart = this.clock.now();
     if (index !== this.currentIndex) this.renderIndex(index);
@@ -374,6 +424,7 @@ export class Reader {
     this.currentIndex = 0;
     this.baseElapsed = 0;
     this.parked = false;
+    this.exactWaiting = false;
     this.runEpoch++;
     this.clearTimer();
     this.clearRestartTimer();

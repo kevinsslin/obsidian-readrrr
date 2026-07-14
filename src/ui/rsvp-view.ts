@@ -1,7 +1,7 @@
 import { ItemView, MarkdownView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type { EditorView } from "@codemirror/view";
 import type RsvpReaderPlugin from "../main";
-import { Reader, type ReaderState } from "../reader/reader";
+import { Reader, type ReaderState, type ReaderStatus } from "../reader/reader";
 import { tokenize } from "../core/tokenizer";
 import {
   alignTokensToSource,
@@ -12,6 +12,8 @@ import {
 } from "../core/align";
 import type { Token } from "../core/types";
 import type { OrpSplit } from "../core/orp";
+import { createCheckpoint, resolveCheckpoint } from "../checkpoints";
+import { calculateBookStats, formatBytes, formatDuration } from "../book-stats";
 import { toTimingOptions, toTokenizeOptions, toSpeakOptions } from "../settings";
 import { highlightInEditor } from "./note-highlight";
 import {
@@ -28,6 +30,7 @@ export const VIEW_TYPE_RSVP_READER = "rsvp-reader-view";
 
 const MIN_WPM = 100;
 const MAX_WPM = 1000;
+const CHECKPOINT_INTERVAL_MS = 10_000;
 
 function clampWpm(value: number): number {
   return Math.min(MAX_WPM, Math.max(MIN_WPM, Math.round(value)));
@@ -51,6 +54,9 @@ export class RsvpView extends ItemView {
   private tokenizeKey = "";
   private holdTimer: number | null = null;
   private narrationApplyTimer: number | null = null;
+  private checkpointTimer: number | null = null;
+  private restoringCheckpoint = false;
+  private appliedNarrationProviderId: string | null = null;
   private paddedEditorDom: HTMLElement | null = null;
   private previewIndex: PreviewTextIndex | null = null;
   private previewSearchFrom = 0;
@@ -58,6 +64,7 @@ export class RsvpView extends ItemView {
 
   private root!: HTMLElement;
   private titleEl!: HTMLElement;
+  private statsEl!: HTMLElement;
   private stageEl!: HTMLElement;
   private wordEl!: HTMLElement;
   private beforeEl!: HTMLElement;
@@ -80,8 +87,19 @@ export class RsvpView extends ItemView {
     this.reader = new Reader();
     this.reader.setListeners({
       onWord: (_entry, split) => this.renderWord(split),
-      onState: (state) => this.renderState(state),
-      onFinish: () => this.root.addClass("is-finished"),
+      onState: (state) => {
+        const previousStatus = this.state.status;
+        this.renderState(state);
+        this.updateCheckpoint(state, previousStatus);
+      },
+      onFinish: () => {
+        this.root.addClass("is-finished");
+        this.clearCurrentCheckpoint();
+      },
+      // Fires at most once per session start (the reader drops the failed
+      // session), so this cannot spam. Cloud narration failures (bad key,
+      // network) would otherwise be silent and look like a broken toggle.
+      onNarrationError: (err) => new Notice(`RSVP Reader: narration failed. ${err.message}`),
     });
   }
 
@@ -116,6 +134,7 @@ export class RsvpView extends ItemView {
 
   /** Release timers and audio without removing the pane (used on plugin unload). */
   dispose(): void {
+    this.persistCheckpointNow();
     this.clearNoteFollow();
     if (this.holdTimer !== null) {
       window.clearTimeout(this.holdTimer);
@@ -125,11 +144,16 @@ export class RsvpView extends ItemView {
       window.clearTimeout(this.narrationApplyTimer);
       this.narrationApplyTimer = null;
     }
+    if (this.checkpointTimer !== null) {
+      window.clearTimeout(this.checkpointTimer);
+      this.checkpointTimer = null;
+    }
     this.reader.destroy();
   }
 
   /** Load text into the reader and reset to the first word. */
   setContent(text: string, title: string, file: TFile | null = null): void {
+    this.persistCheckpointNow();
     this.clearNoteFollow();
     this.title = title;
     this.titleEl.setText(title);
@@ -147,6 +171,7 @@ export class RsvpView extends ItemView {
       this.showEmpty("Nothing readable in this note.");
       return;
     }
+    this.restoreCheckpoint();
     this.applyNarration();
     this.root.focus();
   }
@@ -166,9 +191,28 @@ export class RsvpView extends ItemView {
     const key = JSON.stringify(toTokenizeOptions(this.plugin.settings));
     if (this.sourceText !== null && key !== this.tokenizeKey) {
       this.tokenizeKey = key;
+      const previousStatus = this.state.status;
+      const anchor = createCheckpoint(
+        this.sourceFile?.path ?? "",
+        this.tokens,
+        this.tokenRanges,
+        this.state.index,
+      );
       const tokens = tokenize(this.sourceText, toTokenizeOptions(this.plugin.settings));
       this.setTokenData(tokens, this.sourceText);
-      this.reader.load(tokens, toTimingOptions(this.plugin.settings));
+      const index = anchor ? resolveCheckpoint(anchor, tokens, this.tokenRanges) : 0;
+      const restoredStatus =
+        previousStatus === "playing" || previousStatus === "paused" ? "paused" : "idle";
+      this.restoringCheckpoint = true;
+      try {
+        this.reader.load(tokens, toTimingOptions(this.plugin.settings), {
+          index,
+          status: restoredStatus,
+        });
+        if (previousStatus === "playing" && tokens.length > 0) this.reader.play();
+      } finally {
+        this.restoringCheckpoint = false;
+      }
       if (tokens.length === 0) this.showEmpty("Nothing readable in this note.");
     } else {
       this.reader.setTiming(toTimingOptions(this.plugin.settings));
@@ -177,9 +221,22 @@ export class RsvpView extends ItemView {
     // A word-size change alters the natural width, so refit the current word.
     this.fitWord();
 
-    // Settings sliders fire continuously while dragging; debounce the audio
-    // restart (the narrate button state itself is updated inside).
-    this.applyNarrationSoon();
+    // Provider/enable changes must apply inside the current user gesture so iOS
+    // can unlock a fresh audio element. Sliders and same-provider voice changes
+    // can fire in bursts, so keep those restarts debounced.
+    const nextProviderId = this.plugin.settings.narrate
+      ? (this.plugin.getProvider()?.id ?? null)
+      : null;
+    if (nextProviderId !== this.appliedNarrationProviderId) {
+      if (this.narrationApplyTimer !== null) {
+        window.clearTimeout(this.narrationApplyTimer);
+        this.narrationApplyTimer = null;
+      }
+      this.applyNarration();
+    } else {
+      this.applyNarrationSoon();
+    }
+    this.updateBookStats();
     this.updateNoteFollow();
   }
 
@@ -199,19 +256,104 @@ export class RsvpView extends ItemView {
   private applyNarration(): void {
     const provider = this.plugin.getProvider();
     if (this.plugin.settings.narrate && provider) {
-      this.reader.setNarration({ provider, speak: toSpeakOptions(this.plugin.settings) });
+      this.reader.setNarration({
+        provider,
+        speak: toSpeakOptions(this.plugin.settings, provider.id),
+      });
+      this.appliedNarrationProviderId = provider.id;
       this.narrateBtn.addClass("rr-btn-active");
     } else {
       this.reader.setNarration(null);
+      this.appliedNarrationProviderId = null;
       this.narrateBtn.removeClass("rr-btn-active");
     }
     this.narrateBtn.toggleClass("rr-hidden", !provider);
+  }
+
+  private updateCheckpoint(state: ReaderState, previousStatus: ReaderStatus): void {
+    if (
+      this.restoringCheckpoint ||
+      !this.plugin.settings.resumeReadingPosition ||
+      !this.sourceFile ||
+      this.tokens.length === 0
+    ) {
+      return;
+    }
+    if (state.status === "paused" && previousStatus === "playing") {
+      this.persistCheckpointNow();
+      return;
+    }
+    if (
+      (state.status !== "playing" && state.status !== "paused") ||
+      this.checkpointTimer !== null
+    ) {
+      return;
+    }
+    this.checkpointTimer = window.setTimeout(() => {
+      this.checkpointTimer = null;
+      this.persistCheckpointNow();
+    }, CHECKPOINT_INTERVAL_MS);
+  }
+
+  private persistCheckpointNow(): void {
+    if (this.checkpointTimer !== null) {
+      window.clearTimeout(this.checkpointTimer);
+      this.checkpointTimer = null;
+    }
+    if (
+      !this.plugin.settings.resumeReadingPosition ||
+      !this.sourceFile ||
+      this.tokens.length === 0 ||
+      (this.state.status !== "playing" && this.state.status !== "paused")
+    ) {
+      return;
+    }
+    const checkpoint = createCheckpoint(
+      this.sourceFile.path,
+      this.tokens,
+      this.tokenRanges,
+      this.state.index,
+    );
+    if (checkpoint) this.plugin.setCheckpoint(checkpoint);
+  }
+
+  private restoreCheckpoint(): void {
+    const file = this.sourceFile;
+    if (!file || !this.plugin.settings.resumeReadingPosition) return;
+    const checkpoint = this.plugin.getCheckpoint(file.path);
+    if (!checkpoint) return;
+    const index = resolveCheckpoint(checkpoint, this.tokens, this.tokenRanges);
+    if (index <= 0) return;
+    this.restoringCheckpoint = true;
+    try {
+      this.reader.seekToIndex(index);
+    } finally {
+      this.restoringCheckpoint = false;
+    }
+    const stats = calculateBookStats(this.tokens.length, index, this.plugin.settings.wpm);
+    new Notice(
+      `RSVP Reader: resumed at ${Math.round(stats.progress * 100)}% (${formatDuration(stats.remainingReadingMs)} left).`,
+    );
+  }
+
+  private clearCurrentCheckpoint(): void {
+    if (this.checkpointTimer !== null) {
+      window.clearTimeout(this.checkpointTimer);
+      this.checkpointTimer = null;
+    }
+    if (this.sourceFile) this.plugin.clearCheckpoint(this.sourceFile.path);
+  }
+
+  private restartReading(): void {
+    this.clearCurrentCheckpoint();
+    this.reader.stop();
   }
 
   // ---- DOM ----
 
   private buildDom(): void {
     this.titleEl = this.root.createDiv({ cls: "rr-title" });
+    this.statsEl = this.root.createDiv({ cls: "rr-book-stats" });
 
     const stage = this.root.createDiv({ cls: "rr-stage" });
     this.stageEl = stage;
@@ -236,7 +378,7 @@ export class RsvpView extends ItemView {
     this.setupScrub(progress);
 
     const controls = this.root.createDiv({ cls: "rr-controls" });
-    this.makeButton(controls, "rotate-ccw", "Restart", () => this.reader.stop());
+    this.makeButton(controls, "rotate-ccw", "Restart", () => this.restartReading());
     this.makeButton(controls, "chevrons-left", "Previous sentence", () =>
       this.reader.seekBySentence(-1),
     );
@@ -460,10 +602,33 @@ export class RsvpView extends ItemView {
     this.progressKnobEl.style.left = `${pct}%`;
     if (state.status !== "finished") this.root.removeClass("is-finished");
     if (state.status === "idle" && previousStatus !== "idle") this.clearNoteFollow();
+    this.updateBookStats();
     this.updateNoteFollow();
   }
 
+  private updateBookStats(): void {
+    const stats = calculateBookStats(
+      this.state.total,
+      this.state.index,
+      this.plugin.settings.wpm,
+    );
+    if (stats.totalWords === 0) {
+      this.statsEl.setText("");
+      return;
+    }
+    const parts = [
+      `${stats.totalWords.toLocaleString()} words`,
+      `${Math.round(stats.progress * 100)}%`,
+      `${formatDuration(stats.remainingReadingMs)} left at ${this.plugin.settings.wpm} WPM`,
+    ];
+    if (this.plugin.settings.ttsProvider === "unreal-speech") {
+      parts.push(`~${formatBytes(stats.estimatedNarrationBytes)} audio`);
+    }
+    this.statsEl.setText(parts.join(" · "));
+  }
+
   private showEmpty(message: string): void {
+    this.statsEl.setText("");
     this.wordEl.addClass("rr-hidden");
     this.emptyEl.removeClass("rr-hidden");
     this.emptyEl.setText(message);

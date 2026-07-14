@@ -12,3 +12,8 @@ export function clamp(value: number, min: number, max: number): number {
 export function wpmToRate(wpm: number): number {
   return clamp(wpm / 200, 0.5, 4);
 }
+
+/** Map WPM to HTML audio playbackRate, which supports the full 1000 WPM UI range. */
+export function wpmToTimedAudioRate(wpm: number): number {
+  return clamp(wpm / 200, 0.5, 5);
+}

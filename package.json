@@ -1,6 +1,6 @@
 {
   "name": "rsvp-reader",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "RSVP speed-reading for Obsidian, with an optional voice narrator synced to the words.",
   "type": "module",
   "license": "MIT",
@@ -39,8 +39,9 @@
     "@vitest/coverage-v8": "^3.2.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.15.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^25.0.1",
-    "obsidian": "^1.7.2",
+    "obsidian": "^1.13.1",
     "tslib": "^2.8.1",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.16.0",
