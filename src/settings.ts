@@ -13,6 +13,9 @@ import { wpmToRate, wpmToTimedAudioRate } from "./tts/rate";
 import type { SpeakOptions } from "./tts/types";
 import { formatBytes } from "./book-stats";
 
+export type SourcePaneMode = "auto" | "always" | "never";
+export const SOURCE_PANE_MODES: SourcePaneMode[] = ["auto", "always", "never"];
+
 export interface RsvpReaderSettings {
   wpm: number;
   fontSize: number;
@@ -20,6 +23,11 @@ export interface RsvpReaderSettings {
   followInNote: boolean;
   /** Flash the current word in the note whenever playback pauses. */
   locateOnPause: boolean;
+  /**
+   * When to show the note's text inside the reader pane (a split within the
+   * view). "auto" shows it on phones, where Obsidian has no split panes.
+   */
+  sourcePaneMode: SourcePaneMode;
   resumeReadingPosition: boolean;
   skipCodeBlocks: boolean;
   skipFrontmatter: boolean;
@@ -46,6 +54,7 @@ export const DEFAULT_SETTINGS: RsvpReaderSettings = {
   showWpmBar: true,
   followInNote: true,
   locateOnPause: true,
+  sourcePaneMode: "auto",
   resumeReadingPosition: true,
   skipCodeBlocks: true,
   skipFrontmatter: true,
@@ -173,6 +182,25 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
           await save();
         }),
       );
+
+    new Setting(containerEl)
+      .setName("Show the note inside the reader")
+      .setDesc(
+        "Split the reader pane: the note's text on top, the flashed word below. Automatic shows it on phones, where Obsidian cannot split the screen. The book icon in the reader toggles it for the session.",
+      )
+      .addDropdown((dropdown) => {
+        dropdown.addOption("auto", "Automatic (phones)");
+        dropdown.addOption("always", "Always");
+        dropdown.addOption("never", "Never");
+        dropdown.setValue(this.plugin.settings.sourcePaneMode);
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.sourcePaneMode =
+            (SOURCE_PANE_MODES as string[]).includes(value)
+              ? (value as SourcePaneMode)
+              : "auto";
+          await save();
+        });
+      });
 
     new Setting(containerEl)
       .setName("Locate on pause")

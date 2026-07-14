@@ -11,6 +11,8 @@ RSVP Reader shows one word at a time at a fixed point on screen, with a single l
 - **RSVP display** with a Spritz-style optimal recognition point (the highlighted anchor letter stays in a fixed column for every word).
 - **Synced narration** with free system voices or natural Unreal Speech voices (the engine used by Readwise Reader, with your own API key). Cloud narration uses provider-supplied word timestamps for exact RSVP sync. Generated MP3 audio uses a byte-bounded memory cache plus device-local IndexedDB, so matching text, voice, pitch, and bitrate can replay across Obsidian restarts without another synthesis request.
 - **Follow along in the note**: toggle the file button and your note scrolls with the reading, the current sentence colored and kept vertically centered. Works in editing/Live Preview and in Reading view (via the CSS Custom Highlight API). It is a non-destructive overlay: your own `==highlights==` and content are untouched.
+- **Locate**: one tap jumps the note to exactly where you are and flashes the current word for a few seconds. By default the same flash also fires whenever you pause, so stopping always answers "where was I?".
+- **Note inside the reader**: an optional split within the reader pane, the note's text on top and the flashed word below, following along as you read. On by default on phones, where Obsidian cannot split the screen into two panes.
 - **Hold to read**: press and hold the word area to read while held; release to pause exactly where you landed. Tap to toggle play/pause.
 - **Seekable progress bar**: click or drag to scrub anywhere in the note.
 - **Automatic reading checkpoints**: each note remembers its position and resumes there after closing the pane, reloading the plugin, or switching devices through synced plugin settings. Restart clears the checkpoint; finishing clears it as completed.
@@ -57,12 +59,14 @@ The reader opens in its own pane. Click the word (or press space) to play and pa
 | **↑ / ↓** | Increase or decrease speed by 10 wpm |
 | Voice button | Toggle narration on or off |
 | File button | Toggle **Follow in note** (auto-scroll + sentence highlight) |
+| Locate button | Jump to your place in the note and flash the current word for a few seconds |
+| Book button | Toggle the **note-inside-the-reader split** (see below) |
 | Progress bar | Click or drag to scrub |
 | Speed bar | Set words per minute |
 
 ### Settings
 
-Reading speed, word size, automatic checkpoint resume, and whether the speed bar shows. Follow along in the note (auto-scroll and sentence highlight). Whether to skip code blocks and frontmatter. Narration on or off, provider, voice, pitch, volume, device-local cache size, exact cache usage, and a clear-cache control. Choose **System voice** for free narration (on-device voices work offline), or **Unreal Speech** for natural voices using your own API key (its free tier includes 250K characters). Advanced pacing controls include a reset button. Changes apply to an open reader immediately.
+Reading speed, word size, automatic checkpoint resume, and whether the speed bar shows. Follow along in the note (auto-scroll and sentence highlight), locate-on-pause, and when to show the note inside the reader (automatic on phones, always, or never). Whether to skip code blocks and frontmatter. Narration on or off, provider, voice, pitch, volume, device-local cache size, exact cache usage, and a clear-cache control. Choose **System voice** for free narration (on-device voices work offline), or **Unreal Speech** for natural voices using your own API key (its free tier includes 250K characters). Advanced pacing controls include a reset button. Changes apply to an open reader immediately.
 
 ## How narration stays in sync
 

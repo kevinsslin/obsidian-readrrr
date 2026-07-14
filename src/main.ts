@@ -4,6 +4,7 @@ import { RsvpView, VIEW_TYPE_RSVP_READER } from "./ui/rsvp-view";
 import {
   DEFAULT_SETTINGS,
   RsvpReaderSettingTab,
+  SOURCE_PANE_MODES,
   type RsvpReaderSettings,
 } from "./settings";
 import { WebSpeechProvider } from "./tts/webspeech";
@@ -162,6 +163,9 @@ export default class RsvpReaderPlugin extends Plugin {
     delete (this.settings as RsvpReaderSettings & { highlightInNote?: boolean }).highlightInNote;
     if (!["web-speech", "unreal-speech"].includes(this.settings.ttsProvider)) {
       this.settings.ttsProvider = DEFAULT_SETTINGS.ttsProvider;
+    }
+    if (!SOURCE_PANE_MODES.includes(this.settings.sourcePaneMode)) {
+      this.settings.sourcePaneMode = DEFAULT_SETTINGS.sourcePaneMode;
     }
     if (typeof this.settings.unrealVoiceId !== "string") this.settings.unrealVoiceId = null;
 

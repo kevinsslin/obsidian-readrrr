@@ -1,4 +1,13 @@
-import { ItemView, MarkdownView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import {
+  ItemView,
+  MarkdownRenderer,
+  MarkdownView,
+  Notice,
+  Platform,
+  TFile,
+  WorkspaceLeaf,
+  setIcon,
+} from "obsidian";
 import type { EditorView } from "@codemirror/view";
 import type RsvpReaderPlugin from "../main";
 import { Reader, type ReaderState, type ReaderStatus } from "../reader/reader";
@@ -24,6 +33,7 @@ import {
   clearSentenceHighlight,
   centerRangeInScroller,
   PreviewFollowState,
+  PANE_HIGHLIGHT_KEYS,
   type PreviewHit,
 } from "./preview-follow";
 
@@ -67,6 +77,14 @@ export class RsvpView extends ItemView {
   private lastPreviewMissLine: number | null = null;
   private locateFlashTimer: number | null = null;
   private locateRetryTimer: number | null = null;
+  private readonly panePreview = new PreviewFollowState();
+  /** Token index of the sentence the pane last followed (change gate). */
+  private lastPaneSpanStart: number | null = null;
+  /** Session override for the source pane (button); null = follow the setting. */
+  private sourcePaneOverride: boolean | null = null;
+  private lastSourcePaneMode: string | null = null;
+  private sourcePaneRenderedText: string | null = null;
+  private paneRenderSeq = 0;
 
   private root!: HTMLElement;
   private titleEl!: HTMLElement;
@@ -84,6 +102,9 @@ export class RsvpView extends ItemView {
   private narrateBtn!: HTMLButtonElement;
   private followBtn!: HTMLButtonElement;
   private locateBtn!: HTMLButtonElement;
+  private sourcePaneEl!: HTMLElement;
+  private sourcePaneContentEl!: HTMLElement;
+  private sourcePaneBtn!: HTMLButtonElement;
   private wpmBarEl!: HTMLElement;
   private wpmInput!: HTMLInputElement;
   private wpmValueEl!: HTMLElement;
@@ -161,6 +182,7 @@ export class RsvpView extends ItemView {
       this.locateFlashTimer = null;
     }
     this.clearLocateRetry();
+    this.clearPaneFollow();
     this.reader.destroy();
   }
 
@@ -180,6 +202,7 @@ export class RsvpView extends ItemView {
     const tokens = tokenize(text, toTokenizeOptions(this.plugin.settings));
     this.setTokenData(tokens, text);
     this.reader.load(tokens, toTimingOptions(this.plugin.settings));
+    this.updateSourcePane();
     this.updateNoteFollow();
     if (tokens.length === 0) {
       this.showEmpty("Nothing readable in this note.");
@@ -251,6 +274,7 @@ export class RsvpView extends ItemView {
       this.applyNarrationSoon();
     }
     this.updateBookStats();
+    this.updateSourcePane();
     this.updateNoteFollow();
   }
 
@@ -369,6 +393,13 @@ export class RsvpView extends ItemView {
     this.titleEl = this.root.createDiv({ cls: "rr-title" });
     this.statsEl = this.root.createDiv({ cls: "rr-book-stats" });
 
+    // Embedded source pane: the reader's own split (note text above the
+    // stage), for phones where Obsidian cannot split the workspace.
+    this.sourcePaneEl = this.root.createDiv({ cls: "rr-source-pane rr-hidden" });
+    this.sourcePaneContentEl = this.sourcePaneEl.createDiv({
+      cls: "rr-source-content markdown-rendered",
+    });
+
     const stage = this.root.createDiv({ cls: "rr-stage" });
     this.stageEl = stage;
     stage.createDiv({ cls: "rr-guide rr-guide-top" });
@@ -412,6 +443,10 @@ export class RsvpView extends ItemView {
       void this.locateInNote(),
     );
     this.locateBtn.addClass("rr-hidden");
+    this.sourcePaneBtn = this.makeButton(controls, "book-open", "Show the note inside the reader", () =>
+      this.toggleSourcePane(),
+    );
+    this.sourcePaneBtn.addClass("rr-hidden");
     this.counterEl = controls.createDiv({ cls: "rr-counter", text: "0 / 0" });
 
     this.wpmBarEl = this.root.createDiv({ cls: "rr-wpm-bar" });
@@ -619,9 +654,13 @@ export class RsvpView extends ItemView {
     this.progressFillEl.style.width = `${pct}%`;
     this.progressKnobEl.style.left = `${pct}%`;
     if (state.status !== "finished") this.root.removeClass("is-finished");
-    if (state.status === "idle" && previousStatus !== "idle") this.clearNoteFollow();
+    if (state.status === "idle" && previousStatus !== "idle") {
+      this.clearNoteFollow();
+      this.clearPaneFollow();
+    }
     this.updateBookStats();
     this.updateNoteFollow();
+    this.updatePaneFollow();
   }
 
   private updateBookStats(): void {
@@ -899,11 +938,12 @@ export class RsvpView extends ItemView {
     if (
       !this.plugin.settings.locateOnPause ||
       this.restoringCheckpoint ||
-      !this.sourceFile ||
       this.state.total <= 0
     ) {
       return;
     }
+    if (this.flashInPane()) return;
+    if (!this.sourceFile) return;
     const view = this.sourceMarkdownView();
     if (view) this.flashCurrentWord(view, false);
   }
@@ -915,7 +955,11 @@ export class RsvpView extends ItemView {
    * "jump back to my place" flow.
    */
   private async locateInNote(): Promise<void> {
-    if (!this.sourceFile || this.state.total <= 0) return;
+    if (this.state.total <= 0) return;
+    // With the embedded pane open, "where am I" is answered right here; do not
+    // switch away from the reader (on phones revealing would swap tabs).
+    if (this.flashInPane()) return;
+    if (!this.sourceFile) return;
     await this.ensureNoteOpen();
     const view = this.sourceMarkdownView();
     if (!view) return;
@@ -1003,18 +1047,19 @@ export class RsvpView extends ItemView {
     }, LOCATE_FLASH_MS);
   }
 
-  /** Drop the word flash; keep the sentence lit only if follow still owns it. */
+  /** Drop the word flash; keep each sentence lit only if follow still owns it. */
   private clearWordFlash(): void {
     const cm = this.sourceEditorView();
     if (cm) highlightWordInEditor(cm, null);
     applyWordHighlight(null);
-    const followKeeps =
-      this.plugin.settings.followInNote &&
-      (this.state.status === "playing" || this.state.status === "paused");
-    if (!followKeeps) {
+    applyWordHighlight(null, PANE_HIGHLIGHT_KEYS);
+    const active = this.state.status === "playing" || this.state.status === "paused";
+    if (!this.plugin.settings.followInNote || !active) {
       if (cm) highlightInEditor(cm, null);
       clearSentenceHighlight();
     }
+    // The pane's sentence follow is not gated by the followInNote setting.
+    if (!active) this.clearPaneFollow();
   }
 
   private clearLocateRetry(): void {
@@ -1022,6 +1067,109 @@ export class RsvpView extends ItemView {
       window.clearTimeout(this.locateRetryTimer);
       this.locateRetryTimer = null;
     }
+  }
+
+  // ---- embedded source pane ----
+
+  private sourcePaneEnabled(): boolean {
+    if (this.sourcePaneOverride !== null) return this.sourcePaneOverride;
+    const mode = this.plugin.settings.sourcePaneMode;
+    return mode === "always" || (mode === "auto" && Platform.isPhone);
+  }
+
+  private toggleSourcePane(): void {
+    this.sourcePaneOverride = !this.sourcePaneEnabled();
+    this.updateSourcePane();
+  }
+
+  private sourcePaneVisible(): boolean {
+    return !this.sourcePaneEl.hasClass("rr-hidden");
+  }
+
+  /** Show/hide the pane per setting + session override, rendering on demand. */
+  private updateSourcePane(): void {
+    // A changed setting takes effect even after the button was used this session.
+    if (this.plugin.settings.sourcePaneMode !== this.lastSourcePaneMode) {
+      this.lastSourcePaneMode = this.plugin.settings.sourcePaneMode;
+      this.sourcePaneOverride = null;
+    }
+    const hasContent = this.sourceText !== null && this.tokens.length > 0;
+    this.sourcePaneBtn.toggleClass("rr-hidden", !hasContent);
+    const visible = hasContent && this.sourcePaneEnabled();
+    this.sourcePaneBtn.toggleClass("rr-btn-active", visible);
+    this.root.toggleClass("rr-has-source-pane", visible);
+    this.sourcePaneEl.toggleClass("rr-hidden", !visible);
+    if (!visible) {
+      this.clearPaneFollow();
+      return;
+    }
+    if (this.sourcePaneRenderedText !== this.sourceText) void this.renderSourcePane();
+    else this.updatePaneFollow(true);
+  }
+
+  private async renderSourcePane(): Promise<void> {
+    const text = this.sourceText;
+    const seq = ++this.paneRenderSeq;
+    this.panePreview.reset();
+    this.lastPaneSpanStart = null;
+    this.sourcePaneRenderedText = text;
+    // Render into a detached element so a superseding setContent() can never
+    // interleave two notes' blocks in the live pane.
+    const target = document.createElement("div");
+    try {
+      await MarkdownRenderer.render(
+        this.app,
+        text ?? "",
+        target,
+        this.sourceFile?.path ?? "",
+        this,
+      );
+    } catch {
+      if (seq === this.paneRenderSeq) this.sourcePaneRenderedText = null;
+      return;
+    }
+    if (seq !== this.paneRenderSeq) return;
+    this.sourcePaneContentEl.empty();
+    while (target.firstChild) this.sourcePaneContentEl.appendChild(target.firstChild);
+    this.updatePaneFollow(true);
+  }
+
+  /** Sentence follow inside the pane; always on while it is visible. */
+  private updatePaneFollow(force = false): void {
+    if (!this.sourcePaneVisible() || this.state.total <= 0) return;
+    if (this.state.status !== "playing" && this.state.status !== "paused") return;
+    const span = this.sentenceSpans[this.state.index];
+    if (!span) return;
+    if (!force && this.lastPaneSpanStart === span.start) return;
+
+    const hit = this.panePreview.find(this.sourcePaneEl, this.currentSentenceWords());
+    if (!hit) return;
+    if (!centerRangeInScroller(this.sourcePaneEl, hit.range)) {
+      this.panePreview.invalidate();
+      return;
+    }
+    applySentenceHighlight(hit.range, PANE_HIGHLIGHT_KEYS);
+    this.panePreview.searchFrom = hit.span.end;
+    this.panePreview.lastSpan = hit.span;
+    this.lastPaneSpanStart = span.start;
+  }
+
+  /** Word flash inside the pane. Returns false when the pane cannot show it. */
+  private flashInPane(): boolean {
+    if (!this.sourcePaneVisible() || this.state.total <= 0) return false;
+    const hit = this.panePreview.refind(this.sourcePaneEl, this.currentSentenceWords());
+    if (!hit) return false;
+    const wordDomRange = this.currentWordRangeInPreview(hit);
+    applySentenceHighlight(hit.range, PANE_HIGHLIGHT_KEYS);
+    applyWordHighlight(wordDomRange, PANE_HIGHLIGHT_KEYS);
+    centerRangeInScroller(this.sourcePaneEl, wordDomRange ?? hit.range);
+    this.scheduleFlashClear();
+    return true;
+  }
+
+  private clearPaneFollow(): void {
+    clearSentenceHighlight(PANE_HIGHLIGHT_KEYS);
+    this.lastPaneSpanStart = null;
   }
 
   private setWpm(value: number, persist = true): void {

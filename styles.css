@@ -27,6 +27,35 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Embedded source pane ----------------------------------------------------- */
+
+/*
+ * The reader's own split: the note's rendered text above the word stage.
+ * Obsidian cannot split the workspace on phones, so the split lives inside
+ * the view. The pane is the scroll container; container-type: size lets the
+ * typewriter padding below use pane-relative (cq*) units, so any sentence,
+ * including the first and last, can scroll to the pane's vertical center.
+ */
+.rsvp-reader-view .rr-source-pane {
+  flex: 1 1 50%;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-primary);
+  container-type: size;
+}
+
+.rsvp-reader-view .rr-source-content {
+  padding: 45cqh 1rem;
+  font-size: var(--font-text-size, 1rem);
+}
+
+/* Split the leftover space evenly: half note, half word stage. */
+.rsvp-reader-view.rr-has-source-pane .rr-stage {
+  flex: 1 1 50%;
+}
+
 /* Word stage ------------------------------------------------------------- */
 
 .rsvp-reader-view .rr-stage {
