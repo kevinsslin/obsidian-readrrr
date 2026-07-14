@@ -287,9 +287,27 @@
   border-radius: 3px;
 }
 
-/* Reading-view variant, via the CSS Custom Highlight API (no DOM mutation). */
-::highlight(rsvp-reader-sentence) {
+/*
+ * Word-level "locate" flash: a solid accent block on the exact word, shown for
+ * a few seconds when the user jumps back to (or pauses at) their position. It
+ * must read instantly against the softer sentence tint around it.
+ */
+.rsvp-reader-active-word {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: 3px;
+}
+
+/* Reading-view variants, via the CSS Custom Highlight API (no DOM mutation).
+   The -pane- keys are the reader's embedded source pane; same look. */
+::highlight(rsvp-reader-sentence),
+::highlight(rsvp-reader-pane-sentence) {
   background-color: var(--text-highlight-bg);
+}
+::highlight(rsvp-reader-word),
+::highlight(rsvp-reader-pane-word) {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 
 /*
@@ -300,7 +318,8 @@
   .rsvp-reader-active-sentence {
     background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
   }
-  ::highlight(rsvp-reader-sentence) {
+  ::highlight(rsvp-reader-sentence),
+  ::highlight(rsvp-reader-pane-sentence) {
     background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
   }
 }

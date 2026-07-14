@@ -1,5 +1,5 @@
 import { MarkdownView, Notice, Platform, Plugin, requestUrl, TFile } from "obsidian";
-import { noteHighlightField } from "./ui/note-highlight";
+import { noteHighlightExtensions } from "./ui/note-highlight";
 import { RsvpView, VIEW_TYPE_RSVP_READER } from "./ui/rsvp-view";
 import {
   DEFAULT_SETTINGS,
@@ -81,7 +81,7 @@ export default class RsvpReaderPlugin extends Plugin {
     this.providers = [new WebSpeechProvider(), this.unrealProvider];
 
     this.registerView(VIEW_TYPE_RSVP_READER, (leaf) => new RsvpView(leaf, this));
-    this.registerEditorExtension(noteHighlightField);
+    this.registerEditorExtension(noteHighlightExtensions);
 
     this.addRibbonIcon("gauge", "RSVP Reader: read current note", () => {
       void this.readCurrentNote();

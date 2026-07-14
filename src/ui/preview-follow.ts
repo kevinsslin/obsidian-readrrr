@@ -29,7 +29,25 @@ export interface TextSpan {
   end: number;
 }
 
-const HIGHLIGHT_KEY = "rsvp-reader-sentence";
+/**
+ * Highlight-registry keys. The note's Reading view and the reader's embedded
+ * source pane are separate surfaces that can be lit at the same time, so each
+ * gets its own sentence/word pair (a registry key holds exactly one Highlight).
+ */
+export interface HighlightKeys {
+  sentence: string;
+  word: string;
+}
+
+export const NOTE_HIGHLIGHT_KEYS: HighlightKeys = {
+  sentence: "rsvp-reader-sentence",
+  word: "rsvp-reader-word",
+};
+
+export const PANE_HIGHLIGHT_KEYS: HighlightKeys = {
+  sentence: "rsvp-reader-pane-sentence",
+  word: "rsvp-reader-pane-word",
+};
 
 export function buildPreviewIndex(root: HTMLElement): PreviewTextIndex {
   const doc = root.ownerDocument;
@@ -101,6 +119,31 @@ export function findSentenceSpan(
   return null;
 }
 
+/**
+ * Locate one word of a found sentence within that sentence's span. Words are
+ * matched left to right (the same forward order used to find the sentence), so
+ * a word repeated inside the sentence resolves to the right occurrence.
+ * Returns offsets into `index.text`, or null when the word cannot be pinned
+ * down (e.g. the sentence matched via the head/tail bridge and this word was
+ * altered by rendering).
+ */
+export function findWordSpanInSentence(
+  index: PreviewTextIndex,
+  sentence: TextSpan,
+  words: string[],
+  wordIndex: number,
+): TextSpan | null {
+  if (wordIndex < 0 || wordIndex >= words.length) return null;
+  let from = sentence.start;
+  for (let i = 0; i <= wordIndex; i++) {
+    const match = execForward(wordsPattern([words[i]]), index.text, from);
+    if (!match || match.end > sentence.end) return null;
+    if (i === wordIndex) return match;
+    from = match.end;
+  }
+  return null;
+}
+
 function locate(index: PreviewTextIndex, offset: number): { node: Text; offset: number } | null {
   const { nodes, starts } = index;
   if (nodes.length === 0) return null;
@@ -157,17 +200,102 @@ export function canHighlight(): boolean {
   return highlightRegistry() !== null && highlightCtor() !== null;
 }
 
-/** Color the range via the CSS Custom Highlight API; null clears the color. */
-export function applySentenceHighlight(range: Range | null): void {
+/** Color a range under a registry key via the CSS Custom Highlight API. */
+export function applyHighlight(key: string, range: Range | null): void {
   const registry = highlightRegistry();
   const Ctor = highlightCtor();
   if (!registry || !Ctor) return;
-  if (range) registry.set(HIGHLIGHT_KEY, new Ctor(range));
-  else registry.delete(HIGHLIGHT_KEY);
+  if (range) registry.set(key, new Ctor(range));
+  else registry.delete(key);
 }
 
-export function clearSentenceHighlight(): void {
-  applySentenceHighlight(null);
+export function applySentenceHighlight(
+  range: Range | null,
+  keys: HighlightKeys = NOTE_HIGHLIGHT_KEYS,
+): void {
+  applyHighlight(keys.sentence, range);
+}
+
+export function applyWordHighlight(
+  range: Range | null,
+  keys: HighlightKeys = NOTE_HIGHLIGHT_KEYS,
+): void {
+  applyHighlight(keys.word, range);
+}
+
+export function clearSentenceHighlight(keys: HighlightKeys = NOTE_HIGHLIGHT_KEYS): void {
+  applyHighlight(keys.sentence, null);
+  applyHighlight(keys.word, null);
+}
+
+export interface PreviewHit {
+  index: PreviewTextIndex;
+  span: TextSpan;
+  range: Range;
+}
+
+/**
+ * Cached search state for following sentences through one rendered-markdown
+ * surface (the note's Reading view, or the reader's embedded source pane).
+ * Holds the text index plus the forward search position, and knows how to
+ * rebuild when the surface re-renders under it.
+ */
+export class PreviewFollowState {
+  private index: PreviewTextIndex | null = null;
+  /** Next sentence search starts here (end of the last followed sentence). */
+  searchFrom = 0;
+  /** Span of the last successfully followed sentence. */
+  lastSpan: TextSpan | null = null;
+
+  reset(): void {
+    this.index = null;
+    this.searchFrom = 0;
+    this.lastSpan = null;
+  }
+
+  /** Drop the cached text index (the surface re-rendered); keep positions. */
+  invalidate(): void {
+    this.index = null;
+  }
+
+  private attempt(index: PreviewTextIndex, words: string[], from: number): PreviewHit | null {
+    const span = findSentenceSpan(index, words, from);
+    if (!span) return null;
+    const range = rangeForSpan(index, span);
+    // A stale index (the surface re-renders as it scrolls) yields detached
+    // nodes, which count as a miss so the caller rebuilds.
+    if (!range || !range.startContainer.isConnected || !range.endContainer.isConnected) {
+      return null;
+    }
+    return { index, span, range };
+  }
+
+  /** Find the sentence (as display words) in `root`, reusing the cached index. */
+  find(root: HTMLElement, words: string[], from = this.searchFrom): PreviewHit | null {
+    if (words.length === 0) return null;
+    let index = this.index;
+    let searchFrom = from;
+    if (!index || index.root !== root) {
+      index = buildPreviewIndex(root);
+      searchFrom = 0;
+    }
+    let hit = this.attempt(index, words, searchFrom);
+    if (!hit) {
+      index = buildPreviewIndex(root);
+      hit = this.attempt(index, words, 0);
+    }
+    this.index = index;
+    return hit;
+  }
+
+  /**
+   * Like find, but prefer the last followed location, so re-locating the
+   * sentence the follower just lit resolves to the same occurrence even when
+   * the sentence text repeats elsewhere in the note.
+   */
+  refind(root: HTMLElement, words: string[]): PreviewHit | null {
+    return this.find(root, words, this.lastSpan?.start ?? this.searchFrom);
+  }
 }
 
 /**

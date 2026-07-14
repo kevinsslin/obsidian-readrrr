@@ -15,15 +15,16 @@ import type { OrpSplit } from "../core/orp";
 import { createCheckpoint, resolveCheckpoint } from "../checkpoints";
 import { calculateBookStats, formatBytes, formatDuration } from "../book-stats";
 import { toTimingOptions, toTokenizeOptions, toSpeakOptions } from "../settings";
-import { highlightInEditor } from "./note-highlight";
+import { highlightInEditor, highlightWordInEditor } from "./note-highlight";
 import {
-  buildPreviewIndex,
-  findSentenceSpan,
   rangeForSpan,
+  findWordSpanInSentence,
   applySentenceHighlight,
+  applyWordHighlight,
   clearSentenceHighlight,
   centerRangeInScroller,
-  type PreviewTextIndex,
+  PreviewFollowState,
+  type PreviewHit,
 } from "./preview-follow";
 
 export const VIEW_TYPE_RSVP_READER = "rsvp-reader-view";
@@ -31,6 +32,10 @@ export const VIEW_TYPE_RSVP_READER = "rsvp-reader-view";
 const MIN_WPM = 100;
 const MAX_WPM = 1000;
 const CHECKPOINT_INTERVAL_MS = 10_000;
+/** How long the word-level "locate" flash stays lit. */
+const LOCATE_FLASH_MS = 3_000;
+/** One retry after a preview miss, giving the jumped-to block time to render. */
+const LOCATE_RETRY_MS = 350;
 
 function clampWpm(value: number): number {
   return Math.min(MAX_WPM, Math.max(MIN_WPM, Math.round(value)));
@@ -58,9 +63,10 @@ export class RsvpView extends ItemView {
   private restoringCheckpoint = false;
   private appliedNarrationProviderId: string | null = null;
   private paddedEditorDom: HTMLElement | null = null;
-  private previewIndex: PreviewTextIndex | null = null;
-  private previewSearchFrom = 0;
+  private readonly notePreview = new PreviewFollowState();
   private lastPreviewMissLine: number | null = null;
+  private locateFlashTimer: number | null = null;
+  private locateRetryTimer: number | null = null;
 
   private root!: HTMLElement;
   private titleEl!: HTMLElement;
@@ -77,6 +83,7 @@ export class RsvpView extends ItemView {
   private playBtn!: HTMLButtonElement;
   private narrateBtn!: HTMLButtonElement;
   private followBtn!: HTMLButtonElement;
+  private locateBtn!: HTMLButtonElement;
   private wpmBarEl!: HTMLElement;
   private wpmInput!: HTMLInputElement;
   private wpmValueEl!: HTMLElement;
@@ -148,6 +155,11 @@ export class RsvpView extends ItemView {
       window.clearTimeout(this.checkpointTimer);
       this.checkpointTimer = null;
     }
+    if (this.locateFlashTimer !== null) {
+      window.clearTimeout(this.locateFlashTimer);
+      this.locateFlashTimer = null;
+    }
+    this.clearLocateRetry();
     this.reader.destroy();
   }
 
@@ -162,6 +174,7 @@ export class RsvpView extends ItemView {
     this.sourceFile = file;
     this.updateFollowButton();
     this.followBtn.toggleClass("rr-hidden", !file);
+    this.locateBtn.toggleClass("rr-hidden", !file);
     this.tokenizeKey = JSON.stringify(toTokenizeOptions(this.plugin.settings));
     const tokens = tokenize(text, toTokenizeOptions(this.plugin.settings));
     this.setTokenData(tokens, text);
@@ -394,6 +407,10 @@ export class RsvpView extends ItemView {
     );
     this.updateFollowButton();
     this.followBtn.addClass("rr-hidden");
+    this.locateBtn = this.makeButton(controls, "locate", "Show my place in the note", () =>
+      void this.locateInNote(),
+    );
+    this.locateBtn.addClass("rr-hidden");
     this.counterEl = controls.createDiv({ cls: "rr-counter", text: "0 / 0" });
 
     this.wpmBarEl = this.root.createDiv({ cls: "rr-wpm-bar" });
@@ -691,8 +708,7 @@ export class RsvpView extends ItemView {
     this.sentenceRanges =
       tokens.length > 0 ? sentenceRangesByToken(tokens, this.tokenRanges) : [];
     this.sentenceSpans = sentenceTokenSpans(tokens);
-    this.previewIndex = null;
-    this.previewSearchFrom = 0;
+    this.notePreview.reset();
     this.lastPreviewMissLine = null;
   }
 
@@ -778,67 +794,50 @@ export class RsvpView extends ItemView {
    * scroller, or the sentence's block is not rendered yet).
    */
   private followSentenceInPreview(view: MarkdownView): boolean {
-    const span = this.sentenceSpans[this.state.index];
-    if (!span) return false;
-    const words = this.tokens.slice(span.start, span.end + 1).map((t) => t.text);
-    if (words.length === 0) return false;
-
-    const container = view.previewMode.containerEl;
-    if (!container.instanceOf(HTMLElement)) return false;
-    const scroller = container.matches(".markdown-preview-view")
-      ? container
-      : (container.querySelector<HTMLElement>(".markdown-preview-view") ?? container);
-
-    // Find the sentence and build a LIVE range; a stale index (the preview
-    // re-renders as it scrolls) yields detached nodes, which count as a miss.
-    const attempt = (
-      idx: PreviewTextIndex,
-      from: number,
-    ): { span: { start: number; end: number }; range: Range } | null => {
-      const span = findSentenceSpan(idx, words, from);
-      if (!span) return null;
-      const range = rangeForSpan(idx, span);
-      if (!range || !range.startContainer.isConnected || !range.endContainer.isConnected) {
-        return null;
-      }
-      return { span, range };
-    };
-
-    let index = this.previewIndex;
-    let from = this.previewSearchFrom;
-    if (!index || index.root !== scroller) {
-      index = buildPreviewIndex(scroller);
-      from = 0;
-    }
-    let hit = attempt(index, from);
-    if (!hit) {
-      index = buildPreviewIndex(scroller);
-      hit = attempt(index, 0);
-    }
-    this.previewIndex = index;
+    const scroller = this.previewScroller(view);
+    if (!scroller) return false;
+    const hit = this.notePreview.find(scroller, this.currentSentenceWords());
     if (!hit) return false;
 
     if (!centerRangeInScroller(scroller, hit.range)) {
       // No geometry: the block is not rendered yet. Drop the cache so the next
       // tick rebuilds against the freshly rendered DOM.
-      this.previewIndex = null;
+      this.notePreview.invalidate();
       return false;
     }
     applySentenceHighlight(hit.range);
     // Continue the next search after this sentence, so an identical sentence
     // later in the note matches its own occurrence, not this one again.
-    this.previewSearchFrom = hit.span.end;
+    this.notePreview.searchFrom = hit.span.end;
+    this.notePreview.lastSpan = hit.span;
     this.lastPreviewMissLine = null;
     return true;
   }
 
+  private previewScroller(view: MarkdownView): HTMLElement | null {
+    const container = view.previewMode.containerEl;
+    if (!container.instanceOf(HTMLElement)) return null;
+    return container.matches(".markdown-preview-view")
+      ? container
+      : (container.querySelector<HTMLElement>(".markdown-preview-view") ?? container);
+  }
+
+  /** Display words of the sentence containing the current token. */
+  private currentSentenceWords(): string[] {
+    const span = this.sentenceSpans[this.state.index];
+    if (!span) return [];
+    return this.tokens.slice(span.start, span.end + 1).map((t) => t.text);
+  }
+
   private clearNoteFollow(): void {
     const editor = this.sourceEditorView();
-    if (editor) highlightInEditor(editor, null);
+    if (editor) {
+      highlightInEditor(editor, null);
+      highlightWordInEditor(editor, null);
+    }
     clearSentenceHighlight();
     this.setPaddedEditor(null);
-    this.previewIndex = null;
-    this.previewSearchFrom = 0;
+    this.notePreview.reset();
     this.lastPreviewMissLine = null;
     this.lastNoteFollowRange = undefined;
     this.lastNoteFollowView = null;
@@ -887,6 +886,122 @@ export class RsvpView extends ItemView {
     }
     await save;
     this.root.focus(); // keep keyboard control on the reader
+  }
+
+  /**
+   * One-tap "where am I": open/reveal the source note, scroll it to the current
+   * word, and flash that word for a few seconds. On phones, where Obsidian has
+   * no split panes, revealing switches to the note's tab, which is exactly the
+   * "jump back to my place" flow.
+   */
+  private async locateInNote(): Promise<void> {
+    if (!this.sourceFile || this.state.total <= 0) return;
+    await this.ensureNoteOpen();
+    const view = this.sourceMarkdownView();
+    if (!view) return;
+    await this.app.workspace.revealLeaf(view.leaf);
+    this.flashCurrentWord(view, true);
+  }
+
+  /**
+   * Highlight the current word (strong) and its sentence (soft) in the note
+   * and scroll them into view. The word mark clears after LOCATE_FLASH_MS; the
+   * sentence stays only while "Follow in note" owns it.
+   */
+  private flashCurrentWord(view: MarkdownView, retryOnMiss: boolean): void {
+    if (this.state.total <= 0) return;
+    this.clearLocateRetry();
+    const wordRange = this.tokenRanges[this.state.index] ?? null;
+    const sentenceRange = this.sentenceRanges[this.state.index] ?? null;
+
+    if (view.getMode() === "source") {
+      const cm = (view.editor as unknown as { cm?: EditorView }).cm;
+      if (!cm) return;
+      highlightInEditor(
+        cm,
+        sentenceRange ? { from: sentenceRange.start, to: sentenceRange.end } : null,
+      );
+      highlightWordInEditor(
+        cm,
+        wordRange ? { from: wordRange.start, to: wordRange.end } : null,
+      );
+      const target = wordRange ?? sentenceRange;
+      if (target) {
+        view.editor.scrollIntoView(
+          { from: view.editor.offsetToPos(target.start), to: view.editor.offsetToPos(target.end) },
+          true,
+        );
+      }
+      this.scheduleFlashClear();
+      return;
+    }
+
+    const scroller = this.previewScroller(view);
+    if (!scroller) return;
+    const hit = this.notePreview.refind(scroller, this.currentSentenceWords());
+    if (!hit) {
+      // The sentence's block is not rendered (virtualized): jump near it by
+      // line, give it a beat to render, then retry once.
+      if (sentenceRange) {
+        const line =
+          (this.sourceText ?? "").slice(0, sentenceRange.start).match(/\n/g)?.length ?? 0;
+        view.setEphemeralState({ line });
+      }
+      if (retryOnMiss) {
+        this.locateRetryTimer = window.setTimeout(() => {
+          this.locateRetryTimer = null;
+          this.flashCurrentWord(view, false);
+        }, LOCATE_RETRY_MS);
+      }
+      return;
+    }
+    const wordDomRange = this.currentWordRangeInPreview(hit);
+    applySentenceHighlight(hit.range);
+    applyWordHighlight(wordDomRange);
+    centerRangeInScroller(scroller, wordDomRange ?? hit.range);
+    this.scheduleFlashClear();
+  }
+
+  /** DOM range of the current word inside a found sentence, or null. */
+  private currentWordRangeInPreview(hit: PreviewHit): Range | null {
+    const span = this.sentenceSpans[this.state.index];
+    if (!span) return null;
+    const wordSpan = findWordSpanInSentence(
+      hit.index,
+      hit.span,
+      this.currentSentenceWords(),
+      this.state.index - span.start,
+    );
+    return wordSpan ? rangeForSpan(hit.index, wordSpan) : null;
+  }
+
+  private scheduleFlashClear(): void {
+    if (this.locateFlashTimer !== null) window.clearTimeout(this.locateFlashTimer);
+    this.locateFlashTimer = window.setTimeout(() => {
+      this.locateFlashTimer = null;
+      this.clearWordFlash();
+    }, LOCATE_FLASH_MS);
+  }
+
+  /** Drop the word flash; keep the sentence lit only if follow still owns it. */
+  private clearWordFlash(): void {
+    const cm = this.sourceEditorView();
+    if (cm) highlightWordInEditor(cm, null);
+    applyWordHighlight(null);
+    const followKeeps =
+      this.plugin.settings.followInNote &&
+      (this.state.status === "playing" || this.state.status === "paused");
+    if (!followKeeps) {
+      if (cm) highlightInEditor(cm, null);
+      clearSentenceHighlight();
+    }
+  }
+
+  private clearLocateRetry(): void {
+    if (this.locateRetryTimer !== null) {
+      window.clearTimeout(this.locateRetryTimer);
+      this.locateRetryTimer = null;
+    }
   }
 
   private setWpm(value: number, persist = true): void {
