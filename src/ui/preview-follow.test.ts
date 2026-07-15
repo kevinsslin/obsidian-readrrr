@@ -6,9 +6,7 @@ import {
   findWordSpanInSentence,
   rangeForSpan,
   centerRangeInScroller,
-  applySentenceHighlight,
-  applyWordHighlight,
-  canHighlight,
+  OverlayMarks,
   PreviewFollowState,
 } from "./preview-follow";
 
@@ -189,19 +187,73 @@ describe("rangeForSpan", () => {
   });
 });
 
-describe("highlight + centering degrade gracefully", () => {
-  it("is a no-op without the CSS Custom Highlight API (jsdom)", () => {
-    expect(canHighlight()).toBe(false);
-    const root = makeRoot("<p>abc def.</p>");
+describe("OverlayMarks", () => {
+  function sentenceRange(root: HTMLElement): Range {
     const index = buildPreviewIndex(root);
     const span = findSentenceSpan(index, ["abc", "def."], 0)!;
-    const range = rangeForSpan(index, span)!;
-    expect(() => applySentenceHighlight(range)).not.toThrow();
-    expect(() => applySentenceHighlight(null)).not.toThrow();
-    expect(() => applyWordHighlight(range)).not.toThrow();
-    expect(() => applyWordHighlight(null)).not.toThrow();
+    return rangeForSpan(index, span)!;
+  }
+
+  it("creates one marks layer inside the container and clears it", () => {
+    const root = makeRoot("<p>abc def.</p>");
+    const marks = new OverlayMarks();
+    marks.drawSentence(root, sentenceRange(root));
+    expect(root.querySelectorAll(".rsvp-reader-marks").length).toBe(1);
+    marks.drawSentence(root, sentenceRange(root));
+    expect(root.querySelectorAll(".rsvp-reader-marks").length).toBe(1);
+    marks.clear();
+    expect(root.querySelector(".rsvp-reader-marks")).toBeNull();
   });
 
+  it("re-creates the layer after the container is wiped by a re-render", () => {
+    const root = makeRoot("<p>abc def.</p>");
+    const marks = new OverlayMarks();
+    marks.drawSentence(root, sentenceRange(root));
+    root.replaceChildren(); // simulated re-render
+    root.innerHTML = "<p>abc def.</p>";
+    marks.drawSentence(root, sentenceRange(root));
+    const layers = root.querySelectorAll(".rsvp-reader-marks");
+    expect(layers.length).toBe(1);
+    expect(layers[0].isConnected).toBe(true);
+  });
+
+  it("hides the word marker for a null or zero-geometry word", () => {
+    const root = makeRoot("<p>abc def.</p>");
+    const marks = new OverlayMarks();
+    marks.drawSentence(root, sentenceRange(root));
+    // jsdom has no layout, so all rects are zero: the marker must stay hidden
+    // rather than draw a zero-size box at 0,0.
+    marks.moveWord(sentenceRange(root), "box");
+    expect(root.querySelector(".rsvp-reader-mark-word")).toBeNull();
+    expect(() => marks.moveWord(null, "box")).not.toThrow();
+  });
+
+  it("withHidden restores the layer's display even when fn throws", () => {
+    const root = makeRoot("<p>abc def.</p>");
+    const marks = new OverlayMarks();
+    marks.drawSentence(root, sentenceRange(root));
+    const layer = root.querySelector<HTMLElement>(".rsvp-reader-marks")!;
+    expect(() =>
+      marks.withHidden(() => {
+        expect(layer.style.display).toBe("none");
+        throw new Error("boom");
+      }),
+    ).toThrow("boom");
+    expect(layer.style.display).not.toBe("none");
+  });
+
+  it("toggles the flash class on the layer", () => {
+    const root = makeRoot("<p>abc def.</p>");
+    const marks = new OverlayMarks();
+    marks.drawSentence(root, sentenceRange(root));
+    marks.setFlash(true);
+    expect(root.querySelector(".rsvp-reader-marks")!.classList.contains("rr-flash")).toBe(true);
+    marks.setFlash(false);
+    expect(root.querySelector(".rsvp-reader-marks")!.classList.contains("rr-flash")).toBe(false);
+  });
+});
+
+describe("centering degrades gracefully", () => {
   it("reports false for a range with no geometry (unrendered)", () => {
     const root = makeRoot("<p>abc def.</p>");
     const index = buildPreviewIndex(root);

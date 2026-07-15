@@ -30,10 +30,8 @@ import {
   buildPreviewIndex,
   rangeForSpan,
   findWordSpanInSentence,
-  applySentenceHighlight,
-  applyWordHighlight,
-  clearSentenceHighlight,
   centerRangeInScroller,
+  OverlayMarks,
   PreviewFollowState,
   type PreviewHit,
   type PreviewTextIndex,
@@ -76,6 +74,9 @@ export class RsvpView extends ItemView {
   private appliedNarrationProviderId: string | null = null;
   private paddedEditorDom: HTMLElement | null = null;
   private readonly notePreview = new PreviewFollowState();
+  private readonly noteMarks = new OverlayMarks();
+  /** The last followed sentence hit in the note's preview (for word marks). */
+  private lastNoteHit: PreviewHit | null = null;
   private lastPreviewMissLine: number | null = null;
   private locateFlashTimer: number | null = null;
   private locateRetryTimer: number | null = null;
@@ -84,8 +85,7 @@ export class RsvpView extends ItemView {
   /** The pane's current sentence hit, keyed by the sentence's first token. */
   private paneHit: (PreviewHit & { tokenStart: number }) | null = null;
   private paneFlashTimer: number | null = null;
-  /** The one persistent word marker; kept so CSS can glide it between words. */
-  private paneWordBoxEl: HTMLElement | null = null;
+  private readonly paneMarks = new OverlayMarks();
   /** Tap-to-seek data: pane text index, node offsets, and token anchors. */
   private paneClickIndex: PreviewTextIndex | null = null;
   private paneNodeStarts: Map<Text, number> | null = null;
@@ -114,7 +114,6 @@ export class RsvpView extends ItemView {
   private locateBtn!: HTMLButtonElement;
   private sourcePaneEl!: HTMLElement;
   private sourcePaneContentEl!: HTMLElement;
-  private paneMarksEl!: HTMLElement;
   private sourcePaneBtn!: HTMLButtonElement;
   private restartBtn!: HTMLButtonElement;
   private wpmBarEl!: HTMLElement;
@@ -414,7 +413,6 @@ export class RsvpView extends ItemView {
     this.sourcePaneContentEl = this.sourcePaneEl.createDiv({
       cls: "rr-source-content markdown-rendered",
     });
-    this.paneMarksEl = this.sourcePaneContentEl.createDiv({ cls: "rr-pane-marks" });
     // Tap a word in the pane to seek the reader there (scrolls do not click).
     this.registerDomEvent(this.sourcePaneEl, "click", (e) => this.onPaneClick(e));
 
@@ -881,13 +879,20 @@ export class RsvpView extends ItemView {
       this.lastNoteFollowMode === mode &&
       this.sameNoteFollowRange(sentenceRange)
     ) {
+      // Same sentence: only the word marker moves (preview mode).
+      if (mode === "preview" && this.lastNoteHit) {
+        this.noteMarks.moveWord(
+          this.currentWordRangeInPreview(this.lastNoteHit),
+          this.plugin.settings.paneMarkerStyle,
+        );
+      }
       return;
     }
 
     if (mode === "source") {
       const cm = (view.editor as unknown as { cm?: EditorView }).cm;
       if (!cm) return;
-      clearSentenceHighlight(); // the CSS text highlight belongs to preview mode
+      this.clearNoteMarks(); // the overlay marks belong to preview mode
       this.setPaddedEditor(cm.dom);
       highlightInEditor(
         cm,
@@ -907,8 +912,8 @@ export class RsvpView extends ItemView {
       return;
     }
 
-    // Reading (preview) view: color the sentence's text with the CSS Custom
-    // Highlight API and center it by scrolling the preview scroller directly.
+    // Reading (preview) view: color the sentence's text with overlay marks
+    // and center it by scrolling the preview scroller directly.
     this.setPaddedEditor(null);
     if (!sentenceRange) return;
     if (this.followSentenceInPreview(view)) {
@@ -955,7 +960,12 @@ export class RsvpView extends ItemView {
       this.notePreview.invalidate();
       return false;
     }
-    applySentenceHighlight(hit.range);
+    this.noteMarks.drawSentence(this.previewSizer(scroller), hit.range);
+    this.noteMarks.moveWord(
+      this.currentWordRangeInPreview(hit),
+      this.plugin.settings.paneMarkerStyle,
+    );
+    this.lastNoteHit = hit;
     // Continue the next search after this sentence, so an identical sentence
     // later in the note matches its own occurrence, not this one again.
     this.notePreview.searchFrom = hit.span.end;
@@ -972,11 +982,21 @@ export class RsvpView extends ItemView {
       : (container.querySelector<HTMLElement>(".markdown-preview-view") ?? container);
   }
 
+  /** The preview's content element (scrolls with the text; hosts the marks). */
+  private previewSizer(scroller: HTMLElement): HTMLElement {
+    return scroller.querySelector<HTMLElement>(".markdown-preview-sizer") ?? scroller;
+  }
+
   /** Display words of the sentence containing the current token. */
   private currentSentenceWords(): string[] {
     const span = this.sentenceSpans[this.state.index];
     if (!span) return [];
     return this.tokens.slice(span.start, span.end + 1).map((t) => t.text);
+  }
+
+  private clearNoteMarks(): void {
+    this.noteMarks.clear();
+    this.lastNoteHit = null;
   }
 
   private clearNoteFollow(): void {
@@ -985,7 +1005,7 @@ export class RsvpView extends ItemView {
       highlightInEditor(editor, null);
       highlightWordInEditor(editor, null);
     }
-    clearSentenceHighlight();
+    this.clearNoteMarks();
     this.setPaddedEditor(null);
     this.notePreview.reset();
     this.lastPreviewMissLine = null;
@@ -1130,8 +1150,10 @@ export class RsvpView extends ItemView {
       return;
     }
     const wordDomRange = this.currentWordRangeInPreview(hit);
-    applySentenceHighlight(hit.range);
-    applyWordHighlight(wordDomRange);
+    this.noteMarks.drawSentence(this.previewSizer(scroller), hit.range);
+    this.noteMarks.moveWord(wordDomRange, this.plugin.settings.paneMarkerStyle);
+    this.noteMarks.setFlash(true);
+    this.lastNoteHit = hit;
     centerRangeInScroller(scroller, wordDomRange ?? hit.range);
     this.scheduleFlashClear();
   }
@@ -1161,11 +1183,13 @@ export class RsvpView extends ItemView {
   private clearWordFlash(): void {
     const cm = this.sourceEditorView();
     if (cm) highlightWordInEditor(cm, null);
-    applyWordHighlight(null);
+    this.noteMarks.setFlash(false);
     const active = this.state.status === "playing" || this.state.status === "paused";
+    // While follow owns the marks they stay (sentence and word both show the
+    // standing position); otherwise the flash was all there was, so clear.
     if (!this.plugin.settings.followInNote || !active) {
       if (cm) highlightInEditor(cm, null);
-      clearSentenceHighlight();
+      this.clearNoteMarks();
     }
   }
 
@@ -1238,9 +1262,6 @@ export class RsvpView extends ItemView {
     if (seq !== this.paneRenderSeq) return;
     this.sourcePaneContentEl.empty();
     while (target.firstChild) this.sourcePaneContentEl.appendChild(target.firstChild);
-    // The marks layer lives inside the content (so it scrolls with the text)
-    // and must be recreated after each render wipes the content.
-    this.paneMarksEl = this.sourcePaneContentEl.createDiv({ cls: "rr-pane-marks" });
     this.buildPaneClickMap();
     this.updatePaneFollow(true);
   }
@@ -1266,13 +1287,7 @@ export class RsvpView extends ItemView {
   private paneCaretOffset(x: number, y: number): number | null {
     // caretRangeFromPoint hit-tests the overlay marks even though they are
     // pointer-events: none, so blank the layer for the synchronous lookup.
-    const marksDisplay = this.paneMarksEl.style.display;
-    this.paneMarksEl.style.display = "none";
-    try {
-      return this.paneCaretOffsetUnobstructed(x, y);
-    } finally {
-      this.paneMarksEl.style.display = marksDisplay;
-    }
+    return this.paneMarks.withHidden(() => this.paneCaretOffsetUnobstructed(x, y));
   }
 
   private paneCaretOffsetUnobstructed(x: number, y: number): number | null {
@@ -1364,63 +1379,12 @@ export class RsvpView extends ItemView {
       this.panePreview.searchFrom = found.span.end;
       this.panePreview.lastSpan = found.span;
       this.paneHit = { ...found, tokenStart: span.start };
-      this.drawSentenceMarks(this.paneHit.range);
+      this.paneMarks.drawSentence(this.sourcePaneContentEl, this.paneHit.range);
     }
-    this.moveWordMark(this.currentWordRangeInPreview(this.paneHit!));
-  }
-
-  /** Redraw the sentence tint boxes (only when the sentence changes). */
-  private drawSentenceMarks(sentence: Range): void {
-    this.paneMarksEl.empty();
-    this.paneWordBoxEl = null;
-    const base = this.sourcePaneContentEl.getBoundingClientRect();
-    for (const rect of Array.from(sentence.getClientRects())) {
-      if (rect.width <= 0 || rect.height <= 0) continue;
-      const box = this.paneMarksEl.createDiv({ cls: "rr-mark rr-mark-sentence" });
-      box.style.left = `${rect.left - base.left}px`;
-      box.style.top = `${rect.top - base.top}px`;
-      box.style.width = `${rect.width}px`;
-      box.style.height = `${rect.height}px`;
-    }
-  }
-
-  /**
-   * Move the single persistent word marker to `word`. Reusing one element lets
-   * CSS transition its position, so the marker glides between words instead of
-   * teleporting, which is what made the follow feel jittery. The first
-   * placement after a redraw snaps (rr-snap) rather than gliding in from 0,0.
-   */
-  private moveWordMark(word: Range | null): void {
-    if (!word) {
-      this.paneWordBoxEl?.addClass("rr-hidden");
-      return;
-    }
-    const rect = word.getClientRects()[0];
-    if (!rect || rect.width <= 0 || rect.height <= 0) {
-      this.paneWordBoxEl?.addClass("rr-hidden");
-      return;
-    }
-    const base = this.sourcePaneContentEl.getBoundingClientRect();
-    let box = this.paneWordBoxEl;
-    const fresh = box === null;
-    if (!box) {
-      const underline = this.plugin.settings.paneMarkerStyle === "underline";
-      box = this.paneMarksEl.createDiv({
-        cls: underline ? "rr-mark rr-mark-word rr-mark-underline rr-snap" : "rr-mark rr-mark-word rr-snap",
-      });
-      this.paneWordBoxEl = box;
-    }
-    box.removeClass("rr-hidden");
-    const underline = box.hasClass("rr-mark-underline");
-    box.style.left = `${rect.left - base.left}px`;
-    box.style.top = `${(underline ? rect.bottom - 3 : rect.top) - base.top}px`;
-    box.style.width = `${rect.width}px`;
-    box.style.height = underline ? "3px" : `${rect.height}px`;
-    if (fresh) {
-      // Commit the snapped position, then allow gliding from the next move on.
-      void box.offsetWidth;
-      box.removeClass("rr-snap");
-    }
+    this.paneMarks.moveWord(
+      this.currentWordRangeInPreview(this.paneHit!),
+      this.plugin.settings.paneMarkerStyle,
+    );
   }
 
   /**
@@ -1433,11 +1397,11 @@ export class RsvpView extends ItemView {
     if (!this.paneHit) return false;
     const wordDomRange = this.currentWordRangeInPreview(this.paneHit);
     if (wordDomRange) centerRangeInScroller(this.sourcePaneEl, wordDomRange);
-    this.paneMarksEl.addClass("rr-flash");
+    this.paneMarks.setFlash(true);
     if (this.paneFlashTimer !== null) window.clearTimeout(this.paneFlashTimer);
     this.paneFlashTimer = window.setTimeout(() => {
       this.paneFlashTimer = null;
-      this.paneMarksEl.removeClass("rr-flash");
+      this.paneMarks.setFlash(false);
     }, LOCATE_FLASH_MS);
     return true;
   }
@@ -1447,9 +1411,7 @@ export class RsvpView extends ItemView {
       window.clearTimeout(this.paneFlashTimer);
       this.paneFlashTimer = null;
     }
-    this.paneMarksEl?.empty();
-    this.paneMarksEl?.removeClass("rr-flash");
-    this.paneWordBoxEl = null;
+    this.paneMarks.clear();
     this.paneHit = null;
   }
 

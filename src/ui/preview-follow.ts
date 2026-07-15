@@ -7,13 +7,12 @@
  * 1. Index every text node under the preview root into one big string.
  * 2. Find the current sentence's words in that string (whitespace-flexible
  *    regex, forward-first search) and build a DOM Range over the match.
- * 3. Color the Range with the CSS Custom Highlight API (no DOM mutation, so
- *    Obsidian's renderer is never disturbed) and scroll the range's midpoint
- *    to the vertical center of the preview scroller.
+ * 3. Color the Range with OverlayMarks (plugin-drawn boxes; see that class
+ *    for why the CSS Custom Highlight API is not used) and scroll the range's
+ *    midpoint to the vertical center of the preview scroller.
  *
- * Everything degrades gracefully: without CSS.highlights there is no color
- * (scrolling still works), and an unrendered/virtualized block simply reports
- * a miss so the caller can fall back to a line-based jump and retry.
+ * Everything degrades gracefully: an unrendered/virtualized block simply
+ * reports a miss so the caller can fall back to a line-based jump and retry.
  */
 
 export interface PreviewTextIndex {
@@ -28,22 +27,6 @@ export interface TextSpan {
   start: number;
   end: number;
 }
-
-/**
- * Highlight-registry keys for the note's Reading view. (The reader's embedded
- * source pane does not use the registry: its DOM is the plugin's own, so it
- * draws plain overlay boxes instead, which also work on engines without the
- * CSS Custom Highlight API.)
- */
-export interface HighlightKeys {
-  sentence: string;
-  word: string;
-}
-
-export const NOTE_HIGHLIGHT_KEYS: HighlightKeys = {
-  sentence: "rsvp-reader-sentence",
-  word: "rsvp-reader-word",
-};
 
 export function buildPreviewIndex(root: HTMLElement): PreviewTextIndex {
   const doc = root.ownerDocument;
@@ -175,53 +158,135 @@ export function rangeForSpan(index: PreviewTextIndex, span: TextSpan): Range | n
   }
 }
 
-interface HighlightRegistry {
-  set(key: string, highlight: unknown): void;
-  delete(key: string): boolean;
-}
+export type MarkerStyle = "box" | "underline";
 
-function highlightRegistry(): HighlightRegistry | null {
-  const css = (window as { CSS?: { highlights?: HighlightRegistry } }).CSS;
-  return css?.highlights ?? null;
-}
+/**
+ * The follow marks for one rendered-markdown surface: translucent sentence
+ * boxes plus one persistent word marker, drawn as the plugin's own overlay
+ * elements. Overlays are used instead of the CSS Custom Highlight API because
+ * iOS WebKit fails to repaint a replaced highlight's old region (stale
+ * highlights pile up on screen) and older iOS lacks the API entirely.
+ *
+ * The layer lives inside the surface's content element, so it scrolls with
+ * the text, and it is re-created transparently when a re-render wipes it.
+ * Uses only standard DOM APIs so it is unit-testable outside Obsidian.
+ */
+export class OverlayMarks {
+  private container: HTMLElement | null = null;
+  private layer: HTMLElement | null = null;
+  private wordBox: HTMLElement | null = null;
 
-type HighlightConstructor = new (...ranges: Range[]) => unknown;
+  /** The layer must live inside `container` and survive its re-renders. */
+  private ensureLayer(container: HTMLElement): HTMLElement {
+    if (this.layer && this.layer.isConnected && this.container === container) {
+      return this.layer;
+    }
+    this.layer?.remove();
+    this.container = container;
+    // Absolute mark positions need a positioned ancestor. Obsidian's preview
+    // sizer and the reader's own pane already are; this guards other hosts.
+    if (getComputedStyle(container).position === "static") {
+      container.style.position = "relative";
+    }
+    const layer = container.ownerDocument.createElement("div");
+    layer.className = "rsvp-reader-marks";
+    container.appendChild(layer);
+    this.layer = layer;
+    this.wordBox = null;
+    return layer;
+  }
 
-function highlightCtor(): HighlightConstructor | null {
-  return (window as { Highlight?: HighlightConstructor }).Highlight ?? null;
-}
+  /** Range.getClientRects is missing in some runtimes (jsdom); treat as none. */
+  private static rectsOf(range: Range): DOMRect[] {
+    return typeof range.getClientRects === "function" ? Array.from(range.getClientRects()) : [];
+  }
 
-/** True when the CSS Custom Highlight API is available in this runtime. */
-export function canHighlight(): boolean {
-  return highlightRegistry() !== null && highlightCtor() !== null;
-}
+  private place(el: HTMLElement, rect: DOMRect, base: DOMRect, underline: boolean): void {
+    el.style.left = `${rect.left - base.left}px`;
+    el.style.top = `${(underline ? rect.bottom - 3 : rect.top) - base.top}px`;
+    el.style.width = `${rect.width}px`;
+    el.style.height = underline ? "3px" : `${rect.height}px`;
+  }
 
-/** Color a range under a registry key via the CSS Custom Highlight API. */
-export function applyHighlight(key: string, range: Range | null): void {
-  const registry = highlightRegistry();
-  const Ctor = highlightCtor();
-  if (!registry || !Ctor) return;
-  if (range) registry.set(key, new Ctor(range));
-  else registry.delete(key);
-}
+  /** Redraw the sentence tint boxes (call only when the sentence changes). */
+  drawSentence(container: HTMLElement, range: Range): void {
+    const layer = this.ensureLayer(container);
+    layer.replaceChildren();
+    this.wordBox = null;
+    const base = container.getBoundingClientRect();
+    for (const rect of OverlayMarks.rectsOf(range)) {
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const box = layer.ownerDocument.createElement("div");
+      box.className = "rsvp-reader-mark rsvp-reader-mark-sentence";
+      this.place(box, rect, base, false);
+      layer.appendChild(box);
+    }
+  }
 
-export function applySentenceHighlight(
-  range: Range | null,
-  keys: HighlightKeys = NOTE_HIGHLIGHT_KEYS,
-): void {
-  applyHighlight(keys.sentence, range);
-}
+  /**
+   * Move the single persistent word marker. Reusing one element lets CSS
+   * transition its position, so the marker glides between words instead of
+   * teleporting. The first placement after a redraw snaps (rr-snap).
+   */
+  moveWord(word: Range | null, style: MarkerStyle): void {
+    if (!this.layer || !this.container) return;
+    if (!word) {
+      this.wordBox?.classList.add("rr-hidden");
+      return;
+    }
+    const rect = OverlayMarks.rectsOf(word)[0];
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      this.wordBox?.classList.add("rr-hidden");
+      return;
+    }
+    const base = this.container.getBoundingClientRect();
+    let box = this.wordBox;
+    const fresh = box === null;
+    if (!box) {
+      box = this.layer.ownerDocument.createElement("div");
+      box.className = "rsvp-reader-mark rsvp-reader-mark-word rr-snap";
+      if (style === "underline") box.classList.add("rsvp-reader-mark-underline");
+      this.layer.appendChild(box);
+      this.wordBox = box;
+    }
+    box.classList.remove("rr-hidden");
+    this.place(box, rect, base, box.classList.contains("rsvp-reader-mark-underline"));
+    if (fresh) {
+      // Commit the snapped position, then allow gliding from the next move on.
+      void box.offsetWidth;
+      box.classList.remove("rr-snap");
+    }
+  }
 
-export function applyWordHighlight(
-  range: Range | null,
-  keys: HighlightKeys = NOTE_HIGHLIGHT_KEYS,
-): void {
-  applyHighlight(keys.word, range);
-}
+  /** Toggle the locate pulse on the word marker. */
+  setFlash(on: boolean): void {
+    this.layer?.classList.toggle("rr-flash", on);
+  }
 
-export function clearSentenceHighlight(keys: HighlightKeys = NOTE_HIGHLIGHT_KEYS): void {
-  applyHighlight(keys.sentence, null);
-  applyHighlight(keys.word, null);
+  /** Hide the word marker only (the sentence tint stays). */
+  hideWord(): void {
+    this.wordBox?.classList.add("rr-hidden");
+  }
+
+  /** Run `fn` with the layer hidden (caretRangeFromPoint hit-tests overlays). */
+  withHidden<T>(fn: () => T): T {
+    const layer = this.layer;
+    if (!layer) return fn();
+    const display = layer.style.display;
+    layer.style.display = "none";
+    try {
+      return fn();
+    } finally {
+      layer.style.display = display;
+    }
+  }
+
+  clear(): void {
+    this.layer?.remove();
+    this.layer = null;
+    this.wordBox = null;
+    this.container = null;
+  }
 }
 
 export interface PreviewHit {

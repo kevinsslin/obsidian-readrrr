@@ -53,22 +53,24 @@
 }
 
 /*
- * Follow marks in the pane: plugin-drawn overlay boxes (the pane DOM is ours),
- * so they work on every engine, including iOS versions without the CSS Custom
- * Highlight API. Translucent accent over the text; the word box is darker and
- * always tracks the currently flashed word.
+ * Follow marks: plugin-drawn overlay boxes, used both in the reader's own
+ * pane and in the note's Reading view (deliberately unscoped for the latter).
+ * Overlays instead of the CSS Custom Highlight API because iOS WebKit fails
+ * to repaint a replaced highlight's old region (stale sentence highlights
+ * pile up on screen) and older iOS lacks the API entirely. Translucent accent
+ * over the text; the word box is darker and tracks the current word.
  */
-.rsvp-reader-view .rr-pane-marks {
+.rsvp-reader-marks {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.rsvp-reader-view .rr-mark {
+.rsvp-reader-mark {
   position: absolute;
   border-radius: 3px;
   background-color: var(--text-accent);
 }
-.rsvp-reader-view .rr-mark-sentence {
+.rsvp-reader-mark-sentence {
   opacity: 0.09;
 }
 /*
@@ -77,7 +79,7 @@
  * read as jitter). rr-snap suspends the glide for the first placement after a
  * redraw so the marker does not fly in from the previous sentence.
  */
-.rsvp-reader-view .rr-mark-word {
+.rsvp-reader-mark-word {
   opacity: 0.4;
   transition:
     left 110ms ease-out,
@@ -85,21 +87,24 @@
     width 110ms ease-out,
     height 110ms ease-out;
 }
-.rsvp-reader-view .rr-mark-word.rr-snap {
+.rsvp-reader-mark-word.rr-snap {
   transition: none;
 }
+.rsvp-reader-mark.rr-hidden {
+  display: none;
+}
 /* Underline marker style: a thin bar under the word instead of a box. */
-.rsvp-reader-view .rr-mark-word.rr-mark-underline {
+.rsvp-reader-mark-word.rsvp-reader-mark-underline {
   opacity: 0.9;
   border-radius: 1.5px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .rsvp-reader-view .rr-mark-word {
+  .rsvp-reader-mark-word {
     transition: none;
   }
 }
 /* Locate pulse: briefly throb the word marker so the eye finds it. */
-.rsvp-reader-view .rr-pane-marks.rr-flash .rr-mark-word {
+.rsvp-reader-marks.rr-flash .rsvp-reader-mark-word {
   animation: rr-word-pulse 0.7s ease-in-out 3;
 }
 @keyframes rr-word-pulse {
@@ -108,7 +113,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .rsvp-reader-view .rr-pane-marks.rr-flash .rr-mark-word {
+  .rsvp-reader-marks.rr-flash .rsvp-reader-mark-word {
     animation: none;
     opacity: 0.6;
   }
@@ -382,10 +387,10 @@
 }
 
 /*
- * Follow highlight in the note. A translucent accent tint so it reads as the
- * reading cursor and never gets confused with the user's own ==highlights==
- * (which keep the theme's --text-highlight-bg). Both mechanisms are overlays:
- * the note's own content and marks are never modified. The plain
+ * Follow highlight in the note's EDITING view (CodeMirror decorations; the
+ * Reading view uses the overlay marks above). A translucent accent tint so it
+ * reads as the reading cursor and never gets confused with the user's own
+ * ==highlights== (which keep the theme's --text-highlight-bg). The plain
  * --text-highlight-bg declaration is the fallback for engines without
  * color-mix support.
  */
@@ -405,24 +410,12 @@
   border-radius: 3px;
 }
 
-/* Reading-view variants, via the CSS Custom Highlight API (no DOM mutation). */
-::highlight(rsvp-reader-sentence) {
-  background-color: var(--text-highlight-bg);
-}
-::highlight(rsvp-reader-word) {
-  background-color: var(--interactive-accent);
-  color: var(--text-on-accent);
-}
-
 /*
  * Prefer a translucent accent tint where color-mix is supported (every current
  * Obsidian target); the solid --text-highlight-bg above is the fallback.
  */
 @supports (background-color: color-mix(in srgb, red 50%, transparent)) {
   .rsvp-reader-active-sentence {
-    background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
-  }
-  ::highlight(rsvp-reader-sentence) {
     background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
   }
 }
