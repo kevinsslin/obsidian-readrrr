@@ -6,7 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-07-15
+## [0.3.0] - 2026-07-15
+
+### Added
+
+- One-tap locate: a new crosshair button jumps the note to the current word
+  and marks it with a strong accent flash for a few seconds (softer sentence
+  tint around it), in both editing view and Reading view.
+- Locate on pause (default on): pausing flashes the current word in the note,
+  so stopping always answers "where was I?". It never steals focus; on phones
+  it also positions the hidden note tab so switching to it lands on the spot.
+- The note inside the reader: an optional split within the reader pane, the
+  note's rendered text on top and the flashed word below, following along with
+  the same centered sentence highlight. Obsidian cannot split the workspace on
+  phones, so this is on by default there ("Automatic"), with Always and Never
+  options plus a book toolbar button for a session override.
+
+### Changed
+
+- Locate and the pause flash target the embedded pane directly when it is
+  open, instead of switching to the note's tab.
 
 ### Fixed
 
