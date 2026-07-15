@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-16
+
+### Added
+
+- The note-inside-the-reader pane now marks the current word with a solid
+  accent box that moves as you read, over a soft sentence tint, so your place
+  is always visible while playing, not only on pause.
+- On phones the controls collapse to the essentials (previous / play / next
+  and Locate) plus a More menu holding Restart, narration, Follow in note,
+  and the reader split. Desktop and tablet keep every button.
+
+### Fixed
+
+- Pane highlights were invisible on iOS versions below 17.2 (and hard to spot
+  on any phone). The pane now draws its own overlay marks instead of using the
+  CSS Custom Highlight API, so they render on every platform.
+
 ## [0.3.0] - 2026-07-15
 
 ### Added
