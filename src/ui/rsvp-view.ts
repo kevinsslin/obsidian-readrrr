@@ -79,6 +79,7 @@ export class RsvpView extends ItemView {
   private lastPreviewMissLine: number | null = null;
   private locateFlashTimer: number | null = null;
   private locateRetryTimer: number | null = null;
+  private rampTimers: number[] = [];
   private readonly panePreview = new PreviewFollowState();
   /** The pane's current sentence hit, keyed by the sentence's first token. */
   private paneHit: (PreviewHit & { tokenStart: number }) | null = null;
@@ -131,6 +132,8 @@ export class RsvpView extends ItemView {
         this.renderState(state);
         this.updateCheckpoint(state, previousStatus);
         if (state.status === "paused" && previousStatus === "playing") this.onPaused();
+        if (state.status === "playing" && previousStatus !== "playing") this.startRampUp();
+        else if (state.status !== "playing" && previousStatus === "playing") this.cancelRampUp();
       },
       onFinish: () => {
         this.root.addClass("is-finished");
@@ -193,6 +196,7 @@ export class RsvpView extends ItemView {
       this.locateFlashTimer = null;
     }
     this.clearLocateRetry();
+    this.cancelRampUp();
     this.clearPaneFollow();
     this.reader.destroy();
   }
@@ -523,7 +527,9 @@ export class RsvpView extends ItemView {
           .onClick(() => this.toggleNarration()),
       );
     }
-    if (this.sourceFile) {
+    // On a phone with the pane open, following the (hidden) note tab is
+    // meaningless; offering it would only confuse. The pane follows already.
+    if (this.sourceFile && !(Platform.isPhone && this.sourcePaneVisible())) {
       menu.addItem((item) =>
         item
           .setTitle("Follow in note")
@@ -620,15 +626,21 @@ export class RsvpView extends ItemView {
   }
 
   /**
-   * Tap the word area to toggle play/pause; press and hold to read while held
-   * and pause on release ("hold to read, release to see where you are"). The
-   * word, counter, and progress mark your position.
+   * Word-area gestures: tap toggles play/pause; press and hold reads while
+   * held and pauses on release ("hold to read, release to see where you
+   * are"); a horizontal swipe jumps a sentence back or forward (swipe left =
+   * next, like flipping a page onward). The word, counter, and progress mark
+   * your position.
    */
   private setupStageGesture(stage: HTMLElement): void {
     const HOLD_MS = 220;
+    const SWIPE_PX = 48;
     let activePointer: number | null = null;
     let holding = false;
     let holdStartedPlayback = false;
+    let startX = 0;
+    let startY = 0;
+    let swipeDir: -1 | 0 | 1 = 0;
 
     const end = (commitTap: boolean): void => {
       if (this.holdTimer !== null) {
@@ -636,6 +648,8 @@ export class RsvpView extends ItemView {
         window.clearTimeout(this.holdTimer);
         this.holdTimer = null;
         if (commitTap && this.state.total > 0) this.reader.toggle();
+      } else if (swipeDir !== 0) {
+        if (commitTap && this.state.total > 0) this.reader.seekBySentence(swipeDir);
       } else if (holding && holdStartedPlayback) {
         // The hold started playback, so releasing pauses where it landed. A
         // hold that began while already playing leaves playback untouched.
@@ -643,6 +657,7 @@ export class RsvpView extends ItemView {
       }
       holding = false;
       holdStartedPlayback = false;
+      swipeDir = 0;
       activePointer = null;
       this.root.focus();
     };
@@ -652,6 +667,9 @@ export class RsvpView extends ItemView {
       activePointer = e.pointerId;
       holding = false;
       holdStartedPlayback = false;
+      swipeDir = 0;
+      startX = e.clientX;
+      startY = e.clientY;
       stage.setPointerCapture(e.pointerId);
       this.holdTimer = window.setTimeout(() => {
         this.holdTimer = null;
@@ -662,6 +680,19 @@ export class RsvpView extends ItemView {
         }
       }, HOLD_MS);
       e.preventDefault();
+    });
+    this.registerDomEvent(stage, "pointermove", (e) => {
+      if (e.pointerId !== activePointer || holding || swipeDir !== 0) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.abs(dx) >= SWIPE_PX && Math.abs(dx) > 2 * Math.abs(dy)) {
+        swipeDir = dx < 0 ? 1 : -1;
+        // A decisive swipe is not a tap and not a hold.
+        if (this.holdTimer !== null) {
+          window.clearTimeout(this.holdTimer);
+          this.holdTimer = null;
+        }
+      }
     });
     this.registerDomEvent(stage, "pointerup", (e) => {
       if (e.pointerId === activePointer) end(true);
@@ -1410,7 +1441,40 @@ export class RsvpView extends ItemView {
     this.paneHit = null;
   }
 
+  /**
+   * Ease back into pace after every (re)start: ~70% for the first beat, then
+   * 85%, then full speed within a second. Re-entering the word stream cold at
+   * full WPM costs a few missed words; the ramp absorbs that. Narrated runs
+   * skip it, since audio owns the pace and would desync from a slowed visual.
+   */
+  private startRampUp(): void {
+    this.cancelRampUp();
+    if (!this.plugin.settings.rampUpOnPlay) return;
+    if (this.plugin.settings.narrate && this.plugin.getProvider()) return;
+    const apply = (factor: number): void => {
+      const timing = toTimingOptions(this.plugin.settings);
+      this.reader.setTiming({
+        ...timing,
+        wpm: Math.max(MIN_WPM, Math.round(timing.wpm * factor)),
+      });
+    };
+    apply(0.7);
+    this.rampTimers.push(window.setTimeout(() => apply(0.85), 450));
+    this.rampTimers.push(
+      window.setTimeout(() => {
+        this.rampTimers = [];
+        apply(1);
+      }, 900),
+    );
+  }
+
+  private cancelRampUp(): void {
+    for (const timer of this.rampTimers) window.clearTimeout(timer);
+    this.rampTimers = [];
+  }
+
   private setWpm(value: number, persist = true): void {
+    this.cancelRampUp(); // a manual speed change wins over a pending ramp step
     const wpm = clampWpm(value);
     this.plugin.settings.wpm = wpm;
     this.wpmInput.value = String(wpm);
