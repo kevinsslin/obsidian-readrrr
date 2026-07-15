@@ -81,6 +81,8 @@ export class RsvpView extends ItemView {
   /** The pane's current sentence hit, keyed by the sentence's first token. */
   private paneHit: (PreviewHit & { tokenStart: number }) | null = null;
   private paneFlashTimer: number | null = null;
+  /** The one persistent word marker; kept so CSS can glide it between words. */
+  private paneWordBoxEl: HTMLElement | null = null;
   /** Session override for the source pane (button); null = follow the setting. */
   private sourcePaneOverride: boolean | null = null;
   private lastSourcePaneMode: string | null = null;
@@ -420,6 +422,12 @@ export class RsvpView extends ItemView {
     const resizeObserver = new ResizeObserver(() => this.fitWord());
     resizeObserver.observe(stage);
     this.register(() => resizeObserver.disconnect());
+
+    // The overlay marks hold absolute positions, so a pane resize (which
+    // reflows the text) must trigger a redraw at the new geometry.
+    const paneResizeObserver = new ResizeObserver(() => this.updatePaneFollow(true));
+    paneResizeObserver.observe(this.sourcePaneEl);
+    this.register(() => paneResizeObserver.disconnect());
 
     const progress = this.root.createDiv({ cls: "rr-progress" });
     this.progressFillEl = progress.createDiv({ cls: "rr-progress-fill" });
@@ -1220,27 +1228,63 @@ export class RsvpView extends ItemView {
       this.panePreview.searchFrom = found.span.end;
       this.panePreview.lastSpan = found.span;
       this.paneHit = { ...found, tokenStart: span.start };
+      this.drawSentenceMarks(this.paneHit.range);
     }
-    this.setPaneMarks(this.paneHit!.range, this.currentWordRangeInPreview(this.paneHit!));
+    this.moveWordMark(this.currentWordRangeInPreview(this.paneHit!));
   }
 
-  /** Draw the sentence and word overlay boxes over the pane's text. */
-  private setPaneMarks(sentence: Range | null, word: Range | null): void {
+  /** Redraw the sentence tint boxes (only when the sentence changes). */
+  private drawSentenceMarks(sentence: Range): void {
     this.paneMarksEl.empty();
-    if (!sentence) return;
+    this.paneWordBoxEl = null;
     const base = this.sourcePaneContentEl.getBoundingClientRect();
-    const draw = (range: Range, cls: string): void => {
-      for (const rect of Array.from(range.getClientRects())) {
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        const box = this.paneMarksEl.createDiv({ cls });
-        box.style.left = `${rect.left - base.left}px`;
-        box.style.top = `${rect.top - base.top}px`;
-        box.style.width = `${rect.width}px`;
-        box.style.height = `${rect.height}px`;
-      }
-    };
-    draw(sentence, "rr-mark rr-mark-sentence");
-    if (word) draw(word, "rr-mark rr-mark-word");
+    for (const rect of Array.from(sentence.getClientRects())) {
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const box = this.paneMarksEl.createDiv({ cls: "rr-mark rr-mark-sentence" });
+      box.style.left = `${rect.left - base.left}px`;
+      box.style.top = `${rect.top - base.top}px`;
+      box.style.width = `${rect.width}px`;
+      box.style.height = `${rect.height}px`;
+    }
+  }
+
+  /**
+   * Move the single persistent word marker to `word`. Reusing one element lets
+   * CSS transition its position, so the marker glides between words instead of
+   * teleporting, which is what made the follow feel jittery. The first
+   * placement after a redraw snaps (rr-snap) rather than gliding in from 0,0.
+   */
+  private moveWordMark(word: Range | null): void {
+    if (!word) {
+      this.paneWordBoxEl?.addClass("rr-hidden");
+      return;
+    }
+    const rect = word.getClientRects()[0];
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      this.paneWordBoxEl?.addClass("rr-hidden");
+      return;
+    }
+    const base = this.sourcePaneContentEl.getBoundingClientRect();
+    let box = this.paneWordBoxEl;
+    const fresh = box === null;
+    if (!box) {
+      const underline = this.plugin.settings.paneMarkerStyle === "underline";
+      box = this.paneMarksEl.createDiv({
+        cls: underline ? "rr-mark rr-mark-word rr-mark-underline rr-snap" : "rr-mark rr-mark-word rr-snap",
+      });
+      this.paneWordBoxEl = box;
+    }
+    box.removeClass("rr-hidden");
+    const underline = box.hasClass("rr-mark-underline");
+    box.style.left = `${rect.left - base.left}px`;
+    box.style.top = `${(underline ? rect.bottom - 3 : rect.top) - base.top}px`;
+    box.style.width = `${rect.width}px`;
+    box.style.height = underline ? "3px" : `${rect.height}px`;
+    if (fresh) {
+      // Commit the snapped position, then allow gliding from the next move on.
+      void box.offsetWidth;
+      box.removeClass("rr-snap");
+    }
   }
 
   /**
@@ -1269,6 +1313,7 @@ export class RsvpView extends ItemView {
     }
     this.paneMarksEl?.empty();
     this.paneMarksEl?.removeClass("rr-flash");
+    this.paneWordBoxEl = null;
     this.paneHit = null;
   }
 

@@ -16,6 +16,9 @@ import { formatBytes } from "./book-stats";
 export type SourcePaneMode = "auto" | "always" | "never";
 export const SOURCE_PANE_MODES: SourcePaneMode[] = ["auto", "always", "never"];
 
+export type PaneMarkerStyle = "box" | "underline";
+export const PANE_MARKER_STYLES: PaneMarkerStyle[] = ["box", "underline"];
+
 export interface RsvpReaderSettings {
   wpm: number;
   fontSize: number;
@@ -28,6 +31,10 @@ export interface RsvpReaderSettings {
    * view). "auto" shows it on phones, where Obsidian has no split panes.
    */
   sourcePaneMode: SourcePaneMode;
+  /** How the current word is marked in the embedded pane. */
+  paneMarkerStyle: PaneMarkerStyle;
+  /** Ease back into full speed for a moment after each (re)start. */
+  rampUpOnPlay: boolean;
   resumeReadingPosition: boolean;
   skipCodeBlocks: boolean;
   skipFrontmatter: boolean;
@@ -55,6 +62,8 @@ export const DEFAULT_SETTINGS: RsvpReaderSettings = {
   followInNote: true,
   locateOnPause: true,
   sourcePaneMode: "auto",
+  paneMarkerStyle: "box",
+  rampUpOnPlay: true,
   resumeReadingPosition: true,
   skipCodeBlocks: true,
   skipFrontmatter: true,
@@ -201,6 +210,32 @@ export class RsvpReaderSettingTab extends PluginSettingTab {
           await save();
         });
       });
+
+    new Setting(containerEl)
+      .setName("Word marker style")
+      .setDesc("How the current word is marked in the reader's note pane: a translucent box over the word, or a thin underline beneath it.")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("box", "Box");
+        dropdown.addOption("underline", "Underline");
+        dropdown.setValue(this.plugin.settings.paneMarkerStyle);
+        dropdown.onChange(async (value) => {
+          this.plugin.settings.paneMarkerStyle =
+            (PANE_MARKER_STYLES as string[]).includes(value)
+              ? (value as PaneMarkerStyle)
+              : "box";
+          await save();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Ease into speed")
+      .setDesc("Start a touch slower after every pause and reach full speed within a second. Applies to silent reading; narration keeps its own pace.")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.rampUpOnPlay).onChange(async (value) => {
+          this.plugin.settings.rampUpOnPlay = value;
+          await save();
+        }),
+      );
 
     new Setting(containerEl)
       .setName("Locate on pause")

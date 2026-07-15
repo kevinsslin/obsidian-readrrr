@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   RsvpReaderSettingTab,
   SOURCE_PANE_MODES,
+  PANE_MARKER_STYLES,
   type RsvpReaderSettings,
 } from "./settings";
 import { WebSpeechProvider } from "./tts/webspeech";
@@ -166,6 +167,9 @@ export default class RsvpReaderPlugin extends Plugin {
     }
     if (!SOURCE_PANE_MODES.includes(this.settings.sourcePaneMode)) {
       this.settings.sourcePaneMode = DEFAULT_SETTINGS.sourcePaneMode;
+    }
+    if (!PANE_MARKER_STYLES.includes(this.settings.paneMarkerStyle)) {
+      this.settings.paneMarkerStyle = DEFAULT_SETTINGS.paneMarkerStyle;
     }
     if (typeof this.settings.unrealVoiceId !== "string") this.settings.unrealVoiceId = null;
 

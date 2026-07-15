@@ -69,10 +69,34 @@
   background-color: var(--text-accent);
 }
 .rsvp-reader-view .rr-mark-sentence {
-  opacity: 0.14;
+  opacity: 0.09;
 }
+/*
+ * One persistent element per word marker, so this transition makes it GLIDE
+ * between words (a teleporting marker re-grabs attention on every tick, which
+ * read as jitter). rr-snap suspends the glide for the first placement after a
+ * redraw so the marker does not fly in from the previous sentence.
+ */
 .rsvp-reader-view .rr-mark-word {
   opacity: 0.4;
+  transition:
+    left 110ms ease-out,
+    top 110ms ease-out,
+    width 110ms ease-out,
+    height 110ms ease-out;
+}
+.rsvp-reader-view .rr-mark-word.rr-snap {
+  transition: none;
+}
+/* Underline marker style: a thin bar under the word instead of a box. */
+.rsvp-reader-view .rr-mark-word.rr-mark-underline {
+  opacity: 0.9;
+  border-radius: 1.5px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rsvp-reader-view .rr-mark-word {
+    transition: none;
+  }
 }
 /* Locate pulse: briefly throb the word marker so the eye finds it. */
 .rsvp-reader-view .rr-pane-marks.rr-flash .rr-mark-word {
