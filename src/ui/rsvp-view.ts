@@ -27,6 +27,7 @@ import { calculateBookStats, formatBytes, formatDuration } from "../book-stats";
 import { toTimingOptions, toTokenizeOptions, toSpeakOptions } from "../settings";
 import { highlightInEditor, highlightWordInEditor } from "./note-highlight";
 import {
+  buildPreviewIndex,
   rangeForSpan,
   findWordSpanInSentence,
   applySentenceHighlight,
@@ -35,6 +36,7 @@ import {
   centerRangeInScroller,
   PreviewFollowState,
   type PreviewHit,
+  type PreviewTextIndex,
 } from "./preview-follow";
 
 export const VIEW_TYPE_RSVP_READER = "rsvp-reader-view";
@@ -83,6 +85,10 @@ export class RsvpView extends ItemView {
   private paneFlashTimer: number | null = null;
   /** The one persistent word marker; kept so CSS can glide it between words. */
   private paneWordBoxEl: HTMLElement | null = null;
+  /** Tap-to-seek data: pane text index, node offsets, and token anchors. */
+  private paneClickIndex: PreviewTextIndex | null = null;
+  private paneNodeStarts: Map<Text, number> | null = null;
+  private paneTokenAnchors: Array<{ textStart: number; token: number }> = [];
   /** Session override for the source pane (button); null = follow the setting. */
   private sourcePaneOverride: boolean | null = null;
   private lastSourcePaneMode: string | null = null;
@@ -405,6 +411,8 @@ export class RsvpView extends ItemView {
       cls: "rr-source-content markdown-rendered",
     });
     this.paneMarksEl = this.sourcePaneContentEl.createDiv({ cls: "rr-pane-marks" });
+    // Tap a word in the pane to seek the reader there (scrolls do not click).
+    this.registerDomEvent(this.sourcePaneEl, "click", (e) => this.onPaneClick(e));
 
     const stage = this.root.createDiv({ cls: "rr-stage" });
     this.stageEl = stage;
@@ -816,6 +824,11 @@ export class RsvpView extends ItemView {
     this.sentenceSpans = sentenceTokenSpans(tokens);
     this.notePreview.reset();
     this.lastPreviewMissLine = null;
+    // A re-tokenize over the same text (content settings) keeps the rendered
+    // pane, but the token indices moved, so the tap-to-seek map must follow.
+    if (this.sourcePaneRenderedText === source && this.paneClickIndex) {
+      this.buildPaneClickMap();
+    }
   }
 
   private updateNoteFollow(): void {
@@ -1197,7 +1210,87 @@ export class RsvpView extends ItemView {
     // The marks layer lives inside the content (so it scrolls with the text)
     // and must be recreated after each render wipes the content.
     this.paneMarksEl = this.sourcePaneContentEl.createDiv({ cls: "rr-pane-marks" });
+    this.buildPaneClickMap();
     this.updatePaneFollow(true);
+  }
+
+  // ---- tap-to-seek ----
+
+  /**
+   * Align every token to the pane's rendered text once per render, so a tap
+   * can resolve its character offset to the nearest token in O(log n).
+   */
+  private buildPaneClickMap(): void {
+    const index = buildPreviewIndex(this.sourcePaneContentEl);
+    this.paneClickIndex = index;
+    this.paneNodeStarts = new Map(index.nodes.map((node, i) => [node, index.starts[i]]));
+    const ranges = alignTokensToSource(index.text, this.tokens);
+    this.paneTokenAnchors = [];
+    ranges.forEach((range, token) => {
+      if (range) this.paneTokenAnchors.push({ textStart: range.start, token });
+    });
+  }
+
+  /** Character offset in the pane text under the pointer, or null. */
+  private paneCaretOffset(x: number, y: number): number | null {
+    const doc = this.sourcePaneContentEl.ownerDocument as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (
+        x: number,
+        y: number,
+      ) => { offsetNode: Node; offset: number } | null;
+    };
+    let node: Node | null = null;
+    let offset = 0;
+    if (typeof doc.caretRangeFromPoint === "function") {
+      const range = doc.caretRangeFromPoint(x, y);
+      if (range) {
+        node = range.startContainer;
+        offset = range.startOffset;
+      }
+    } else if (typeof doc.caretPositionFromPoint === "function") {
+      const position = doc.caretPositionFromPoint(x, y);
+      if (position) {
+        node = position.offsetNode;
+        offset = position.offset;
+      }
+    }
+    if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+    const start = this.paneNodeStarts?.get(node as Text);
+    return start === undefined ? null : start + offset;
+  }
+
+  private tokenAtPaneOffset(offset: number): number | null {
+    const anchors = this.paneTokenAnchors;
+    if (anchors.length === 0) return null;
+    let lo = 0;
+    let hi = anchors.length - 1;
+    let ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (anchors[mid].textStart <= offset) {
+        ans = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return anchors[ans].token;
+  }
+
+  private onPaneClick(e: MouseEvent): void {
+    if (this.state.total <= 0 || !this.paneClickIndex) return;
+    // A click at the end of a drag-selection must not throw the position away.
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+    // The pane is a reading surface, not a browser: swallow link navigation
+    // and treat the tap as a seek like anywhere else.
+    if ((e.target as HTMLElement | null)?.closest?.("a")) e.preventDefault();
+    const offset = this.paneCaretOffset(e.clientX, e.clientY);
+    if (offset === null) return;
+    const token = this.tokenAtPaneOffset(offset);
+    if (token === null) return;
+    this.reader.seekToIndex(token);
   }
 
   /**
