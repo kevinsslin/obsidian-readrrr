@@ -33,7 +33,6 @@ import {
   clearSentenceHighlight,
   centerRangeInScroller,
   PreviewFollowState,
-  PANE_HIGHLIGHT_KEYS,
   type PreviewHit,
 } from "./preview-follow";
 
@@ -78,8 +77,9 @@ export class RsvpView extends ItemView {
   private locateFlashTimer: number | null = null;
   private locateRetryTimer: number | null = null;
   private readonly panePreview = new PreviewFollowState();
-  /** Token index of the sentence the pane last followed (change gate). */
-  private lastPaneSpanStart: number | null = null;
+  /** The pane's current sentence hit, keyed by the sentence's first token. */
+  private paneHit: (PreviewHit & { tokenStart: number }) | null = null;
+  private paneFlashTimer: number | null = null;
   /** Session override for the source pane (button); null = follow the setting. */
   private sourcePaneOverride: boolean | null = null;
   private lastSourcePaneMode: string | null = null;
@@ -104,6 +104,7 @@ export class RsvpView extends ItemView {
   private locateBtn!: HTMLButtonElement;
   private sourcePaneEl!: HTMLElement;
   private sourcePaneContentEl!: HTMLElement;
+  private paneMarksEl!: HTMLElement;
   private sourcePaneBtn!: HTMLButtonElement;
   private wpmBarEl!: HTMLElement;
   private wpmInput!: HTMLInputElement;
@@ -399,6 +400,7 @@ export class RsvpView extends ItemView {
     this.sourcePaneContentEl = this.sourcePaneEl.createDiv({
       cls: "rr-source-content markdown-rendered",
     });
+    this.paneMarksEl = this.sourcePaneContentEl.createDiv({ cls: "rr-pane-marks" });
 
     const stage = this.root.createDiv({ cls: "rr-stage" });
     this.stageEl = stage;
@@ -1047,19 +1049,16 @@ export class RsvpView extends ItemView {
     }, LOCATE_FLASH_MS);
   }
 
-  /** Drop the word flash; keep each sentence lit only if follow still owns it. */
+  /** Drop the word flash; keep the sentence lit only if follow still owns it. */
   private clearWordFlash(): void {
     const cm = this.sourceEditorView();
     if (cm) highlightWordInEditor(cm, null);
     applyWordHighlight(null);
-    applyWordHighlight(null, PANE_HIGHLIGHT_KEYS);
     const active = this.state.status === "playing" || this.state.status === "paused";
     if (!this.plugin.settings.followInNote || !active) {
       if (cm) highlightInEditor(cm, null);
       clearSentenceHighlight();
     }
-    // The pane's sentence follow is not gated by the followInNote setting.
-    if (!active) this.clearPaneFollow();
   }
 
   private clearLocateRetry(): void {
@@ -1111,7 +1110,7 @@ export class RsvpView extends ItemView {
     const text = this.sourceText;
     const seq = ++this.paneRenderSeq;
     this.panePreview.reset();
-    this.lastPaneSpanStart = null;
+    this.clearPaneFollow();
     this.sourcePaneRenderedText = text;
     // Render into a detached element so a superseding setContent() can never
     // interleave two notes' blocks in the live pane.
@@ -1131,45 +1130,90 @@ export class RsvpView extends ItemView {
     if (seq !== this.paneRenderSeq) return;
     this.sourcePaneContentEl.empty();
     while (target.firstChild) this.sourcePaneContentEl.appendChild(target.firstChild);
+    // The marks layer lives inside the content (so it scrolls with the text)
+    // and must be recreated after each render wipes the content.
+    this.paneMarksEl = this.sourcePaneContentEl.createDiv({ cls: "rr-pane-marks" });
     this.updatePaneFollow(true);
   }
 
-  /** Sentence follow inside the pane; always on while it is visible. */
+  /**
+   * Follow inside the pane; always on while it is visible. The sentence is
+   * re-found and centered only when it changes; the word marker updates on
+   * every tick. Marks are the reader's own overlay boxes (the pane DOM is
+   * ours), so they render on every engine, including iOS versions without the
+   * CSS Custom Highlight API.
+   */
   private updatePaneFollow(force = false): void {
     if (!this.sourcePaneVisible() || this.state.total <= 0) return;
     if (this.state.status !== "playing" && this.state.status !== "paused") return;
     const span = this.sentenceSpans[this.state.index];
     if (!span) return;
-    if (!force && this.lastPaneSpanStart === span.start) return;
 
-    const hit = this.panePreview.find(this.sourcePaneEl, this.currentSentenceWords());
-    if (!hit) return;
-    if (!centerRangeInScroller(this.sourcePaneEl, hit.range)) {
-      this.panePreview.invalidate();
-      return;
+    const sameSentence =
+      !force &&
+      this.paneHit !== null &&
+      this.paneHit.tokenStart === span.start &&
+      this.paneHit.range.startContainer.isConnected;
+    if (!sameSentence) {
+      const found = this.panePreview.find(this.sourcePaneEl, this.currentSentenceWords());
+      if (!found) return;
+      if (!centerRangeInScroller(this.sourcePaneEl, found.range)) {
+        this.panePreview.invalidate();
+        return;
+      }
+      this.panePreview.searchFrom = found.span.end;
+      this.panePreview.lastSpan = found.span;
+      this.paneHit = { ...found, tokenStart: span.start };
     }
-    applySentenceHighlight(hit.range, PANE_HIGHLIGHT_KEYS);
-    this.panePreview.searchFrom = hit.span.end;
-    this.panePreview.lastSpan = hit.span;
-    this.lastPaneSpanStart = span.start;
+    this.setPaneMarks(this.paneHit!.range, this.currentWordRangeInPreview(this.paneHit!));
   }
 
-  /** Word flash inside the pane. Returns false when the pane cannot show it. */
+  /** Draw the sentence and word overlay boxes over the pane's text. */
+  private setPaneMarks(sentence: Range | null, word: Range | null): void {
+    this.paneMarksEl.empty();
+    if (!sentence) return;
+    const base = this.sourcePaneContentEl.getBoundingClientRect();
+    const draw = (range: Range, cls: string): void => {
+      for (const rect of Array.from(range.getClientRects())) {
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const box = this.paneMarksEl.createDiv({ cls });
+        box.style.left = `${rect.left - base.left}px`;
+        box.style.top = `${rect.top - base.top}px`;
+        box.style.width = `${rect.width}px`;
+        box.style.height = `${rect.height}px`;
+      }
+    };
+    draw(sentence, "rr-mark rr-mark-sentence");
+    if (word) draw(word, "rr-mark rr-mark-word");
+  }
+
+  /**
+   * Locate within the pane: re-center on the current word and pulse its
+   * marker. Returns false when the pane cannot show the position.
+   */
   private flashInPane(): boolean {
     if (!this.sourcePaneVisible() || this.state.total <= 0) return false;
-    const hit = this.panePreview.refind(this.sourcePaneEl, this.currentSentenceWords());
-    if (!hit) return false;
-    const wordDomRange = this.currentWordRangeInPreview(hit);
-    applySentenceHighlight(hit.range, PANE_HIGHLIGHT_KEYS);
-    applyWordHighlight(wordDomRange, PANE_HIGHLIGHT_KEYS);
-    centerRangeInScroller(this.sourcePaneEl, wordDomRange ?? hit.range);
-    this.scheduleFlashClear();
+    this.updatePaneFollow(true);
+    if (!this.paneHit) return false;
+    const wordDomRange = this.currentWordRangeInPreview(this.paneHit);
+    if (wordDomRange) centerRangeInScroller(this.sourcePaneEl, wordDomRange);
+    this.paneMarksEl.addClass("rr-flash");
+    if (this.paneFlashTimer !== null) window.clearTimeout(this.paneFlashTimer);
+    this.paneFlashTimer = window.setTimeout(() => {
+      this.paneFlashTimer = null;
+      this.paneMarksEl.removeClass("rr-flash");
+    }, LOCATE_FLASH_MS);
     return true;
   }
 
   private clearPaneFollow(): void {
-    clearSentenceHighlight(PANE_HIGHLIGHT_KEYS);
-    this.lastPaneSpanStart = null;
+    if (this.paneFlashTimer !== null) {
+      window.clearTimeout(this.paneFlashTimer);
+      this.paneFlashTimer = null;
+    }
+    this.paneMarksEl?.empty();
+    this.paneMarksEl?.removeClass("rr-flash");
+    this.paneHit = null;
   }
 
   private setWpm(value: number, persist = true): void {

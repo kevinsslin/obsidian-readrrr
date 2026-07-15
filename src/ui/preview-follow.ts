@@ -30,9 +30,10 @@ export interface TextSpan {
 }
 
 /**
- * Highlight-registry keys. The note's Reading view and the reader's embedded
- * source pane are separate surfaces that can be lit at the same time, so each
- * gets its own sentence/word pair (a registry key holds exactly one Highlight).
+ * Highlight-registry keys for the note's Reading view. (The reader's embedded
+ * source pane does not use the registry: its DOM is the plugin's own, so it
+ * draws plain overlay boxes instead, which also work on engines without the
+ * CSS Custom Highlight API.)
  */
 export interface HighlightKeys {
   sentence: string;
@@ -42,11 +43,6 @@ export interface HighlightKeys {
 export const NOTE_HIGHLIGHT_KEYS: HighlightKeys = {
   sentence: "rsvp-reader-sentence",
   word: "rsvp-reader-word",
-};
-
-export const PANE_HIGHLIGHT_KEYS: HighlightKeys = {
-  sentence: "rsvp-reader-pane-sentence",
-  word: "rsvp-reader-pane-word",
 };
 
 export function buildPreviewIndex(root: HTMLElement): PreviewTextIndex {

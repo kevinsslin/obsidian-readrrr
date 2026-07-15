@@ -47,8 +47,47 @@
 }
 
 .rsvp-reader-view .rr-source-content {
+  position: relative; /* anchors the overlay marks layer */
   padding: 45cqh 1rem;
   font-size: var(--font-text-size, 1rem);
+}
+
+/*
+ * Follow marks in the pane: plugin-drawn overlay boxes (the pane DOM is ours),
+ * so they work on every engine, including iOS versions without the CSS Custom
+ * Highlight API. Translucent accent over the text; the word box is darker and
+ * always tracks the currently flashed word.
+ */
+.rsvp-reader-view .rr-pane-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.rsvp-reader-view .rr-mark {
+  position: absolute;
+  border-radius: 3px;
+  background-color: var(--text-accent);
+}
+.rsvp-reader-view .rr-mark-sentence {
+  opacity: 0.14;
+}
+.rsvp-reader-view .rr-mark-word {
+  opacity: 0.4;
+}
+/* Locate pulse: briefly throb the word marker so the eye finds it. */
+.rsvp-reader-view .rr-pane-marks.rr-flash .rr-mark-word {
+  animation: rr-word-pulse 0.7s ease-in-out 3;
+}
+@keyframes rr-word-pulse {
+  50% {
+    opacity: 0.75;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rsvp-reader-view .rr-pane-marks.rr-flash .rr-mark-word {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 /* Split the leftover space evenly: half note, half word stage. */
@@ -327,14 +366,11 @@
   border-radius: 3px;
 }
 
-/* Reading-view variants, via the CSS Custom Highlight API (no DOM mutation).
-   The -pane- keys are the reader's embedded source pane; same look. */
-::highlight(rsvp-reader-sentence),
-::highlight(rsvp-reader-pane-sentence) {
+/* Reading-view variants, via the CSS Custom Highlight API (no DOM mutation). */
+::highlight(rsvp-reader-sentence) {
   background-color: var(--text-highlight-bg);
 }
-::highlight(rsvp-reader-word),
-::highlight(rsvp-reader-pane-word) {
+::highlight(rsvp-reader-word) {
   background-color: var(--interactive-accent);
   color: var(--text-on-accent);
 }
@@ -347,8 +383,7 @@
   .rsvp-reader-active-sentence {
     background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
   }
-  ::highlight(rsvp-reader-sentence),
-  ::highlight(rsvp-reader-pane-sentence) {
+  ::highlight(rsvp-reader-sentence) {
     background-color: color-mix(in srgb, var(--text-accent) 18%, transparent);
   }
 }
