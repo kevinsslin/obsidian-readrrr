@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-16
+
+### Fixed
+
+- On iOS, old sentence highlights in the note's Reading view lingered and
+  piled up on screen as the follow advanced (a WebKit repaint defect in the
+  CSS Custom Highlight API). Reading view now uses the same plugin-drawn
+  overlay marks as the reader's pane, which repaint correctly everywhere.
+
+### Changed
+
+- The note's Reading view now shows the gliding word marker too, matching the
+  reader's pane, and follow highlights now work on iOS versions below 17.2.
+
 ## [0.4.1] - 2026-07-16
 
 ### Added
