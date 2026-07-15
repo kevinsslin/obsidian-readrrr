@@ -64,6 +64,8 @@ The reader opens in its own pane. Click the word (or press space) to play and pa
 | Progress bar | Click or drag to scrub |
 | Speed bar | Set words per minute |
 
+On phones the row shows only the transport (previous / play / next), Locate, and a **More** menu holding Restart, narration, Follow in note, and the reader split.
+
 ### Settings
 
 Reading speed, word size, automatic checkpoint resume, and whether the speed bar shows. Follow along in the note (auto-scroll and sentence highlight), locate-on-pause, and when to show the note inside the reader (automatic on phones, always, or never). Whether to skip code blocks and frontmatter. Narration on or off, provider, voice, pitch, volume, device-local cache size, exact cache usage, and a clear-cache control. Choose **System voice** for free narration (on-device voices work offline), or **Unreal Speech** for natural voices using your own API key (its free tier includes 250K characters). Advanced pacing controls include a reset button. Changes apply to an open reader immediately.

@@ -2,6 +2,7 @@ import {
   ItemView,
   MarkdownRenderer,
   MarkdownView,
+  Menu,
   Notice,
   Platform,
   TFile,
@@ -106,6 +107,7 @@ export class RsvpView extends ItemView {
   private sourcePaneContentEl!: HTMLElement;
   private paneMarksEl!: HTMLElement;
   private sourcePaneBtn!: HTMLButtonElement;
+  private restartBtn!: HTMLButtonElement;
   private wpmBarEl!: HTMLElement;
   private wpmInput!: HTMLInputElement;
   private wpmValueEl!: HTMLElement;
@@ -424,8 +426,15 @@ export class RsvpView extends ItemView {
     this.progressKnobEl = progress.createDiv({ cls: "rr-progress-knob" });
     this.setupScrub(progress);
 
+    // On phones the row would hold eight buttons, so the four low-frequency
+    // actions (rr-btn-secondary) collapse behind a "More" menu there; the
+    // high-frequency transport (prev / play / next / locate) stays one tap.
+    // Desktop keeps every button and hides "More" (see styles.css).
     const controls = this.root.createDiv({ cls: "rr-controls" });
-    this.makeButton(controls, "rotate-ccw", "Restart", () => this.restartReading());
+    this.restartBtn = this.makeButton(controls, "rotate-ccw", "Restart", () =>
+      this.restartReading(),
+    );
+    this.restartBtn.addClass("rr-btn-secondary");
     this.makeButton(controls, "chevrons-left", "Previous sentence", () =>
       this.reader.seekBySentence(-1),
     );
@@ -436,11 +445,13 @@ export class RsvpView extends ItemView {
     this.narrateBtn = this.makeButton(controls, "volume-2", "Toggle narration", () =>
       this.toggleNarration(),
     );
+    this.narrateBtn.addClass("rr-btn-secondary");
     this.followBtn = this.makeButton(controls, "file-text", "Follow in note", () =>
       void this.toggleFollowInNote(),
     );
     this.updateFollowButton();
     this.followBtn.addClass("rr-hidden");
+    this.followBtn.addClass("rr-btn-secondary");
     this.locateBtn = this.makeButton(controls, "locate", "Show my place in the note", () =>
       void this.locateInNote(),
     );
@@ -449,6 +460,11 @@ export class RsvpView extends ItemView {
       this.toggleSourcePane(),
     );
     this.sourcePaneBtn.addClass("rr-hidden");
+    this.sourcePaneBtn.addClass("rr-btn-secondary");
+    const moreBtn = this.makeButton(controls, "ellipsis-vertical", "More", () =>
+      this.showMoreMenu(moreBtn),
+    );
+    moreBtn.addClass("rr-more");
     this.counterEl = controls.createDiv({ cls: "rr-counter", text: "0 / 0" });
 
     this.wpmBarEl = this.root.createDiv({ cls: "rr-wpm-bar" });
@@ -471,6 +487,46 @@ export class RsvpView extends ItemView {
 
   private updateFollowButton(): void {
     this.followBtn.toggleClass("rr-btn-active", this.plugin.settings.followInNote);
+  }
+
+  /** The collapsed secondary actions, for phones (see rr-btn-secondary). */
+  private showMoreMenu(anchor: HTMLElement): void {
+    const menu = new Menu();
+    menu.addItem((item) =>
+      item
+        .setTitle("Restart")
+        .setIcon("rotate-ccw")
+        .onClick(() => this.restartReading()),
+    );
+    if (this.plugin.getProvider()) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Narrate while reading")
+          .setIcon("volume-2")
+          .setChecked(this.plugin.settings.narrate)
+          .onClick(() => this.toggleNarration()),
+      );
+    }
+    if (this.sourceFile) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Follow in note")
+          .setIcon("file-text")
+          .setChecked(this.plugin.settings.followInNote)
+          .onClick(() => void this.toggleFollowInNote()),
+      );
+    }
+    if (this.sourceText !== null && this.tokens.length > 0) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Show the note in the reader")
+          .setIcon("book-open")
+          .setChecked(this.sourcePaneEnabled())
+          .onClick(() => this.toggleSourcePane()),
+      );
+    }
+    const rect = anchor.getBoundingClientRect();
+    menu.showAtPosition({ x: rect.left, y: rect.top });
   }
 
   private makeButton(

@@ -271,6 +271,21 @@
   background-color: var(--interactive-accent);
 }
 
+/*
+ * Phone: collapse the four low-frequency buttons (restart, narration, follow,
+ * source pane) behind the "More" menu so the row stays uncrowded. Desktop and
+ * tablet keep every button and never show "More".
+ */
+.rsvp-reader-view .rr-more {
+  display: none;
+}
+.is-phone .rsvp-reader-view .rr-more {
+  display: inline-flex;
+}
+.is-phone .rsvp-reader-view .rr-btn-secondary {
+  display: none;
+}
+
 .rsvp-reader-view .rr-counter {
   min-width: 6rem;
   text-align: center;
