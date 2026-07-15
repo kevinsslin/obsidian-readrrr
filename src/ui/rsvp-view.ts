@@ -1264,6 +1264,18 @@ export class RsvpView extends ItemView {
 
   /** Character offset in the pane text under the pointer, or null. */
   private paneCaretOffset(x: number, y: number): number | null {
+    // caretRangeFromPoint hit-tests the overlay marks even though they are
+    // pointer-events: none, so blank the layer for the synchronous lookup.
+    const marksDisplay = this.paneMarksEl.style.display;
+    this.paneMarksEl.style.display = "none";
+    try {
+      return this.paneCaretOffsetUnobstructed(x, y);
+    } finally {
+      this.paneMarksEl.style.display = marksDisplay;
+    }
+  }
+
+  private paneCaretOffsetUnobstructed(x: number, y: number): number | null {
     const doc = this.sourcePaneContentEl.ownerDocument as Document & {
       caretRangeFromPoint?: (x: number, y: number) => Range | null;
       caretPositionFromPoint?: (
