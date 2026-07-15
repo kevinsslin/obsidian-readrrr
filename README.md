@@ -6,6 +6,19 @@ RSVP speed reading for [Obsidian](https://obsidian.md), with an optional voice n
 
 RSVP Reader shows one word at a time at a fixed point on screen, with a single letter highlighted as your eye's anchor. Your eyes stop moving, so you read faster. Turn on narration and a voice reads along, kept in sync with the flashed words, so you get both channels at once.
 
+## Screenshots
+
+**Desktop**: the note follows along beside the reader, with the current sentence tinted and the current word marked in sync with the flashed word.
+
+![Desktop: note follow beside the reader](docs/screenshots/desktop-follow.png)
+
+**Phone**: Obsidian cannot split the screen on phones, so the reader splits itself, with the note on top and the word below, plus compact one-thumb controls. The secondary actions live in a More menu.
+
+<p>
+  <img src="docs/screenshots/phone-split.png" width="44%" alt="Phone: note-inside-the-reader split" />
+  <img src="docs/screenshots/phone-more-menu.png" width="44%" alt="Phone: the More menu" />
+</p>
+
 ## Features
 
 - **RSVP display** with a Spritz-style optimal recognition point (the highlighted anchor letter stays in a fixed column for every word).
