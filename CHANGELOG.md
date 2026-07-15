@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-16
+
+### Added
+
+- Tap a word in the note-inside-the-reader pane to seek the reader there, on
+  desktop and phone. Drag selections still work; link taps seek instead of
+  navigating.
+- "Word marker style" setting: the current word can be marked with the
+  translucent box or a thin underline.
+- "Ease into speed" setting (default on): silent playback restarts at ~70%
+  speed and reaches full pace within a second, so pausing does not cost the
+  first words after each resume. Narrated runs keep audio's own pace.
+- A horizontal swipe on the word area jumps to the previous or next sentence.
+
+### Changed
+
+- The word marker now glides between words instead of teleporting, and the
+  sentence tint is softer (9%), so the follow reads as one calm moving object.
+- On phones with the pane open, the More menu no longer offers "Follow in
+  note" (the note's tab is hidden there; the pane already follows).
+
 ## [0.4.0] - 2026-07-16
 
 ### Added
